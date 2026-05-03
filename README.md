@@ -1,11 +1,12 @@
 # 6-DOF Small Robot Arm — 3D Simulator
+A browser-based 3D simulator for a small 6-axis robotic arm. Modeled with Three.js, you can experiment with kinematics and movements by moving the arm on the screen; developed with Vite, available locally or via GitHub Pages. 
 
-Web tabanlı 6 eksen robot kol simülatörü (Three.js, Vite).
 Mechanic Small Robot Arm  Construction Videos powered by Skyentific...
-
 https://github.com/SkyentificGit/SmallRobotArm
-
 https://www.youtube.com/watch?v=oFCUw1pXlnA&t=130s
+
+# Video
+https://youtu.be/5EUUerlajmY
 
 # Arduino Mega Codes 
 6DoF_Arm_BT_IO.ino
@@ -23,19 +24,19 @@ EN	33	33	33	38	A2	A8
 RX TX
 19 18
 
-## Yerelde çalıştırma (zorunlu)
+## Local Run (Required)
 
-Projeyi ZIP’ten açıp yalnızca `index.html` dosyasına çift tıklamak **çalışmaz**: tarayıcı `file://` üzerinde geliştirme modülünü (`src/main.js` + `three` vb.) güvenlik nedeniyle düzgün yüklemez; 3B alan siyah kalır.
+Opening the project from the ZIP and double-clicking only the `index.html` file **does not work**: the browser does not properly load the development module (`src/main.js` + `three` etc.) on `file://` for security reasons; the 3D area remains black.
 
 ```bash
-cd 6DOF_Small_Robot_Arm_3DSimulator   # veya klonladığınız klasör
+cd 6DOF_Small_Robot_Arm_3DSimulator   # or the folder you cloned
 npm install
 npm run dev
 ```
 
-Tarayıcıda açılan adres (genelde `http://localhost:5173`) üzerinden kullanın.
+Use the address that opens in your browser (usually `http://localhost:5173`).
 
-Üretim derlemesini denemek için:
+To try the production build:
 
 ```bash
 npm run build
@@ -45,4 +46,5 @@ npm run preview
 
 ## GitHub Pages
 
-Depo ayarlarında **Pages → Source: GitHub Actions** seçiliyken `main` dalına push ile site derlenir. Adres: `https://<kullanıcı>.github.io/<depo-adı>/`
+With **Pages → Source: GitHub Actions** selected in the repository settings, the site is built by pushing to the `main` branch. Address: `https://<user>.github.io/<repository-name>/`
+
