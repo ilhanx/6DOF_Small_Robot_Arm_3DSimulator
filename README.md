@@ -1,6 +1,11 @@
 # 6-DOF Small Robot Arm — 3D Simulator
 
 Web tabanlı 6 eksen robot kol simülatörü (Three.js, Vite).
+Mechanic Small Robot Arm  Construction Videos powered by Skyentific...
+
+https://github.com/SkyentificGit/SmallRobotArm
+
+https://www.youtube.com/watch?v=oFCUw1pXlnA&t=130s
 
 ## Yerelde çalıştırma (zorunlu)
 
@@ -20,6 +25,7 @@ Tarayıcıda açılan adres (genelde `http://localhost:5173`) üzerinden kullan�
 npm run build
 npm run preview
 ```
+
 
 ## GitHub Pages
 
