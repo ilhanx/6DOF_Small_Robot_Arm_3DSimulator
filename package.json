@@ -1,0 +1,23 @@
+{
+  "name": "6dof-robot-simulator",
+  "version": "1.0.0",
+  "description": "6 Eksen Robot Kol Web Simülatörü",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "robot",
+    "simulator",
+    "6dof",
+    "threejs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.184.0",
+    "vite": "^8.0.10"
+  }
+}

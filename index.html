@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta id="meta-description" name="description" content="6 Eksenli Robot Kol Web Simülatörü — 3D dijital ikiz, kinematik kontrol ve trajectory planning">
+  <title>6-DOF Robot Kol Simülatörü</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="app-header" id="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">⚙</span>
+        <h1 data-i18n="app.headerTitle">6-DOF Robot Simülatörü</h1>
+      </div>
+    </div>
+    <div class="header-center">
+      <button class="btn btn-action" id="btn-home" data-i18n="header.home" data-i18n-title="header.homeTitle">🏠 Home</button>
+      <button class="btn btn-action" id="btn-start" data-i18n="header.start" data-i18n-title="header.startTitle">🎯 Start</button>
+      <button class="btn btn-toggle" id="btn-auto-ik" data-i18n="header.autoIk" data-i18n-title="header.autoIkTitle">🤖 Auto IK</button>
+      <button class="btn btn-action" id="btn-go-target" data-i18n="header.goTarget" data-i18n-title="header.goTargetTitle">➡️ Hedefe Git</button>
+    </div>
+    <div class="header-right">
+      <label class="lang-select-wrap">
+        <span class="lang-select-label" data-i18n="lang.label">Dil</span>
+        <select id="lang-select" class="lang-select" data-i18n-aria-label="lang.selectAria" aria-label="Language">
+          <option value="tr">Türkçe</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <button type="button" class="btn btn-small btn-secondary" id="btn-com-settings" data-i18n="header.comSettings" data-i18n-title="header.comSettingsTitle">🔌 COM Ayarları</button>
+      <div class="fps-display" id="fps-display">60 FPS</div>
+      <div class="status-indicator" id="status-indicator">
+        <span class="status-dot"></span>
+        <span class="status-text">MANUAL</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN LAYOUT -->
+  <div class="main-layout" id="main-layout">
+    <!-- SOL PANEL -->
+    <aside class="sidebar left-sidebar" id="left-sidebar">
+      <!-- Hedef (TCP) Kontrol -->
+      <section class="panel" id="panel-target">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.targetTitle">🎯 HEDEF (TCP)</span><button type="button" class="panel-info-btn" data-panel-help="panel-target" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="input-group">
+          <div class="input-row"><label>X</label><input type="number" id="tcp-x" value="0" step="1"><span class="unit">mm</span></div>
+          <div class="input-row"><label>Y</label><input type="number" id="tcp-y" value="200" step="1"><span class="unit">mm</span></div>
+          <div class="input-row"><label>Z</label><input type="number" id="tcp-z" value="0" step="1"><span class="unit">mm</span></div>
+        </div>
+        <button class="btn btn-small btn-secondary" id="btn-reset-target" data-i18n="btn.resetTarget">🔄 Hedefi Sıfırla</button>
+      </section>
+
+      <!-- Tracking Modu -->
+      <section class="panel" id="panel-tracking">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.trackingTitle">📡 TAKİP MODU</span><button type="button" class="panel-info-btn" data-panel-help="panel-tracking" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="track-mode" value="position" checked> <span data-i18n="track.position">Position (XYZ)</span></label>
+          <label class="radio-label"><input type="radio" name="track-mode" value="fullpose"> <span data-i18n="track.fullpose">Full Pose</span></label>
+          <label class="radio-label"><input type="radio" name="track-mode" value="lookat"> <span data-i18n="track.lookat">Look-at</span></label>
+        </div>
+      </section>
+
+      <!-- J5 Fix Ekseni -->
+      <section class="panel" id="panel-j5-lock">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.j5LockTitle">🧲 J5 FIX EKSENİ</span><button type="button" class="panel-info-btn" data-panel-help="panel-j5-lock" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="j5-lock-axis" value="x" checked> <span data-i18n="axis.x">X Ekseni</span></label>
+          <label class="radio-label"><input type="radio" name="j5-lock-axis" value="y"> <span data-i18n="axis.y">Y Ekseni</span></label>
+          <label class="radio-label"><input type="radio" name="j5-lock-axis" value="z"> <span data-i18n="axis.z">Z Ekseni</span></label>
+        </div>
+      </section>
+
+      <!-- TCP sürükleme — taban kilidi -->
+      <section class="panel" id="panel-tcp-drag-j1">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.tcpDragTitle">✋ TCP SÜRÜKLEME</span><button type="button" class="panel-info-btn" data-panel-help="panel-tcp-drag-j1" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <p class="panel-hint" data-i18n="tcpDrag.hint">Yeşil tutamaç ile sürüklerken taban (J1) dönüşü</p>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="tcp-drag-j1-lock" value="lock" checked> <span data-i18n="tcpDrag.j1Lock">J1 kilitli</span></label>
+          <label class="radio-label"><input type="radio" name="tcp-drag-j1-lock" value="free"> <span data-i18n="tcpDrag.j1Free">J1 serbest</span></label>
+        </div>
+      </section>
+
+      <!-- Hız Ayarları -->
+      <section class="panel" id="panel-speed">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.speedTitle">⚡ HIZ AYARLARI</span><button type="button" class="panel-info-btn" data-panel-help="panel-speed" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="speed-control">
+          <label data-i18n="speed.accel">Kalkış Hızı</label>
+          <input type="range" min="0" max="100" value="20" class="slider speed-slider" id="speed-accel">
+          <span class="speed-value" id="speed-accel-val">20</span>
+        </div>
+        <div class="speed-control">
+          <label data-i18n="speed.move">Hareket Hızı</label>
+          <input type="range" min="0" max="100" value="60" class="slider speed-slider" id="speed-move">
+          <span class="speed-value" id="speed-move-val">60</span>
+        </div>
+        <div class="speed-control">
+          <label data-i18n="speed.decel">Duruş Hızı</label>
+          <input type="range" min="0" max="100" value="20" class="slider speed-slider" id="speed-decel">
+          <span class="speed-value" id="speed-decel-val">20</span>
+        </div>
+        <div class="speed-actions">
+          <button type="button" class="btn btn-small btn-action" id="btn-speed-send" data-i18n="btn.send" data-i18n-title="btn.sendTitleSpeed">📤 Gönder</button>
+        </div>
+      </section>
+
+      <!-- Yörünge Şablon Ayarları -->
+      <section class="panel" id="panel-template-settings">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.templateTitle">🧭 TRAJECTORY SETTINGS</span><button type="button" class="panel-info-btn" data-panel-help="panel-template-settings" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="input-group">
+          <div class="input-row">
+            <label>X</label>
+            <input type="number" id="template-size-x" value="100" min="10" max="300" step="1">
+            <span class="unit">mm</span>
+          </div>
+          <div class="input-row">
+            <label>Z</label>
+            <input type="number" id="template-size-z" value="100" min="10" max="300" step="1">
+            <span class="unit">mm</span>
+          </div>
+          <div class="input-row">
+            <label>N</label>
+            <input type="number" id="template-steps" value="10" min="4" max="200" step="1">
+            <span class="unit" data-i18n="unit.step">adım</span>
+          </div>
+          <div class="input-row">
+            <label>P</label>
+            <select id="template-plane" class="template-select">
+              <option value="xy">XY</option>
+              <option value="xz" selected>XZ</option>
+              <option value="yz">YZ</option>
+            </select>
+            <span class="unit" data-i18n="unit.plane">düzlem</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- G-code -->
+      <section class="panel" id="panel-gcode">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.gcodeTitle">🧾 G-CODE</span><button type="button" class="panel-info-btn" data-panel-help="panel-gcode" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <textarea id="gcode-input" class="gcode-input" rows="8" data-i18n-placeholder="gcode.placeholder" placeholder="Örnek:
+G90
+G0 X0 Y140 Z0 F2000
+G1 X40 Y140 Z-30 F1200
+G1 X-40 Y140 Z-30 F1200"></textarea>
+        <div class="gcode-actions">
+          <button class="btn btn-small" id="btn-gcode-apply" data-i18n="gcode.apply" data-i18n-title="gcode.applyTitle">G-code Uygula</button>
+          <button class="btn btn-small btn-action" id="btn-gcode-run" data-i18n="gcode.run" data-i18n-title="gcode.runTitle">G-code Oynat</button>
+          <button class="btn btn-small btn-secondary" id="btn-gcode-clear" data-i18n="gcode.clear" data-i18n-title="gcode.clearTitle">Temizle</button>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ORTA — 3D VIEWPORT -->
+    <main class="viewport-container" id="viewport-container">
+      <div class="viewport" id="viewport-3d"></div>
+      <div class="mouse-coord-display" id="mouse-coord-display">X: 000mm Y: 000mm Z: 000mm</div>
+      <div class="camera-angle-display" id="camera-angle-display">Cam Yaw: 0.0° | Pitch: 0.0°</div>
+      <!-- IK Durum mesajı -->
+      <div class="ik-status" id="ik-status" style="display:none;"></div>
+    </main>
+
+    <!-- SAĞ PANEL -->
+    <aside class="sidebar right-sidebar" id="right-sidebar">
+      <!-- Joint Kontrol -->
+      <section class="panel" id="panel-joints">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.jointsTitle">🔧 EKLEM KONTROL</span><button type="button" class="panel-info-btn" data-panel-help="panel-joints" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div id="joint-controls"></div>
+        <div class="joint-panel-actions">
+          <button type="button" class="btn btn-small btn-action" id="btn-joints-simcom-send" data-i18n="btn.send" data-i18n-title="btn.jointsSendTitle">📤 Gönder</button>
+        </div>
+      </section>
+
+      <!-- J4/J5 Hedef Açı Ayarları -->
+      <section class="panel" id="panel-wrist-targets">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.wristTitle">🎛 J4/J5 SET AÇILARI</span><button type="button" class="panel-info-btn" data-panel-help="panel-wrist-targets" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="input-group">
+          <div class="input-row">
+            <label>J4</label>
+            <select id="j4-target-angle" class="template-select">
+              <option value="-90">-90°</option>
+              <option value="-45">-45°</option>
+              <option value="0" selected>0°</option>
+              <option value="45">+45°</option>
+              <option value="90">+90°</option>
+            </select>
+            <span class="unit" data-i18n="unit.target">hedef</span>
+          </div>
+          <div class="input-row">
+            <label>J5</label>
+            <select id="j5-target-angle" class="template-select">
+              <option value="-90" selected>-90°</option>
+              <option value="-45">-45°</option>
+              <option value="0">0°</option>
+              <option value="45">+45°</option>
+              <option value="90">+90°</option>
+            </select>
+            <span class="unit" data-i18n="unit.worldPitch">yere</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pozisyon Bilgisi -->
+      <section class="panel" id="panel-position">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.positionTitle">📐 POZİSYON BİLGİSİ</span><button type="button" class="panel-info-btn" data-panel-help="panel-position" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="position-grid">
+          <div class="pos-item"><label>X:</label><span id="pos-x">0.00</span><span class="unit">mm</span></div>
+          <div class="pos-item"><label>Y:</label><span id="pos-y">0.00</span><span class="unit">mm</span></div>
+          <div class="pos-item"><label>Z:</label><span id="pos-z">0.00</span><span class="unit">mm</span></div>
+          <div class="pos-item"><label>Rx:</label><span id="pos-rx">0.00</span><span class="unit">°</span></div>
+          <div class="pos-item"><label>Ry:</label><span id="pos-ry">0.00</span><span class="unit">°</span></div>
+          <div class="pos-item"><label>Rz:</label><span id="pos-rz">0.00</span><span class="unit">°</span></div>
+        </div>
+      </section>
+
+      <!-- Çıktı Paneli -->
+      <section class="panel" id="panel-output">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.outputTitle">📋 ÇIKTI</span><button type="button" class="panel-info-btn" data-panel-help="panel-output" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <textarea class="output-display" id="output-display" rows="10" spellcheck="false" data-i18n-placeholder="output.placeholder" placeholder="Senaryo çıktısı veya Arduino komutları…"></textarea>
+        <div class="output-actions">
+          <button class="btn btn-small btn-secondary" id="btn-copy-output" data-i18n="btn.copy">📋 Kopyala</button>
+          <button type="button" class="btn btn-small btn-action" id="btn-output-send" data-i18n="btn.send" data-i18n-title="btn.outputSendTitle">📤 Gönder</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- ALT PANEL — TIMELINE + SENARYO -->
+  <footer class="bottom-panel" id="bottom-panel">
+    <div class="timeline-section">
+      <div class="timeline-controls">
+        <button class="btn btn-icon" id="btn-first-step" data-i18n-title="timeline.firstTitle">⏪</button>
+        <button class="btn btn-icon" id="btn-prev-step" data-i18n-title="timeline.prevTitle">⏮</button>
+        <button class="btn btn-icon" id="btn-play" data-i18n-title="timeline.playTitle">▶</button>
+        <button class="btn btn-icon" id="btn-pause" data-i18n-title="timeline.pauseTitle">❚❚</button>
+        <button class="btn btn-icon" id="btn-stop" data-i18n-title="timeline.stopTitle">■</button>
+        <button class="btn btn-icon" id="btn-next-step" data-i18n-title="timeline.nextTitle">⏭</button>
+        <button class="btn btn-icon" id="btn-last-step" data-i18n-title="timeline.lastTitle">⏩</button>
+      </div>
+      <label class="checkbox-label timeline-simultane" data-i18n-title="timeline.simultaneTitle">
+        <input type="checkbox" id="player-com-simultane"> <span data-i18n="timeline.simultane">Simultane (COM)</span>
+      </label>
+      <div class="timeline-bar">
+        <input type="range" min="0" max="100" value="0" class="timeline-slider" id="timeline-slider">
+        <span class="timeline-time" id="timeline-time">00:00 / 00:00</span>
+      </div>
+    </div>
+    <div class="scenario-section">
+      <button class="btn btn-small" id="btn-add-step" data-i18n="footer.addStep" data-i18n-title="footer.addStepTitle">+ Adım Ekle</button>
+      <button class="btn btn-small" id="btn-template-eight" data-i18n="footer.eight" data-i18n-title="footer.eightTitle">∞ 8 Şablonu</button>
+      <button class="btn btn-small" id="btn-template-plus" data-i18n="footer.plus" data-i18n-title="footer.plusTitle">✚ + Şablonu</button>
+      <button class="btn btn-small" id="btn-template-bounds" data-i18n="footer.bounds" data-i18n-title="footer.boundsTitle">▭ Sınır Şablonu</button>
+      <button class="btn btn-small" id="btn-save-json" data-i18n="footer.saveJson" data-i18n-title="footer.saveJsonTitle">💾 JSON Kaydet</button>
+      <button class="btn btn-small" id="btn-save-output" data-i18n="footer.saveOutput" data-i18n-title="footer.saveOutputTitle">📝 Çıktı Kaydet</button>
+      <label for="file-input-json" class="btn btn-small" id="btn-load-json" data-i18n="footer.loadJson" data-i18n-title="footer.loadJsonTitle">📂 JSON Yükle</label>
+      <button class="btn btn-small btn-danger" id="btn-clear-steps" data-i18n="footer.clear" data-i18n-title="footer.clearTitle">🗑 Temizle</button>
+      <button class="btn btn-small btn-action" id="btn-com-write" data-i18n="footer.comWrite" data-i18n-title="footer.comWriteTitle">📡 COM'a Yaz</button>
+      <span class="step-count" id="step-count">0 adım</span>
+      <input type="file" id="file-input-json" accept=".json,.JSON,application/json,text/plain" class="file-input-hidden" data-i18n-aria-label="file.jsonAria">
+    </div>
+  </footer>
+
+  <!-- Panel yardım (ⓘ) -->
+  <div id="panel-help-modal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog panel-help-dialog" role="dialog" aria-modal="true" aria-labelledby="panel-help-title">
+      <h3 id="panel-help-title" class="modal-title"></h3>
+      <div id="panel-help-body" class="panel-help-body"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-small btn-secondary" id="btn-panel-help-close" data-i18n="modal.close">Kapat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- COM / Web Serial ayarları -->
+  <div id="com-settings-modal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog com-modal" role="dialog" aria-labelledby="com-modal-title">
+      <h3 id="com-modal-title" class="modal-title" data-i18n="com.title">🔌 COM Port Ayarları</h3>
+      <p class="modal-hint" data-i18n="com.hint">Chrome veya Edge kullanın (Web Serial). Port seçimi güvenlik için her oturumda onay gerektirebilir.</p>
+      <div class="com-status-row">
+        <span data-i18n="com.statusLabel">Durum:</span>
+        <strong id="com-connection-status" class="com-status-badge off" data-i18n="com.disconnected">Kapalı</strong>
+      </div>
+      <div class="com-form-grid">
+        <label for="com-baud">Baud</label>
+        <select id="com-baud" class="com-select">
+          <option value="9600">9600</option>
+          <option value="19200">19200</option>
+          <option value="38400">38400</option>
+          <option value="57600">57600</option>
+          <option value="115200" selected>115200</option>
+          <option value="230400">230400</option>
+          <option value="460800">460800</option>
+          <option value="921600">921600</option>
+        </select>
+        <label for="com-data-bits" data-i18n="com.dataBits">Veri biti</label>
+        <select id="com-data-bits" class="com-select">
+          <option value="8" selected>8</option>
+          <option value="7">7</option>
+        </select>
+        <label for="com-stop-bits" data-i18n="com.stopBits">Stop biti</label>
+        <select id="com-stop-bits" class="com-select">
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+        </select>
+        <label for="com-parity" data-i18n="com.parity">Parite</label>
+        <select id="com-parity" class="com-select">
+          <option value="none" selected data-i18n="com.parityNone">Yok</option>
+          <option value="even" data-i18n="com.parityEven">Çift</option>
+          <option value="odd" data-i18n="com.parityOdd">Tek</option>
+        </select>
+        <label for="com-flow" data-i18n="com.flow">Akış</label>
+        <select id="com-flow" class="com-select">
+          <option value="none" selected data-i18n="com.flowNone">Yok</option>
+          <option value="hardware" data-i18n="com.flowHw">RTS/CTS</option>
+        </select>
+        <label for="com-line-ending" data-i18n="com.lineEnding">Satır sonu (gönderim)</label>
+        <select id="com-line-ending" class="com-select">
+          <option value="crlf" selected data-i18n="com.leCrlf">CRLF (\r\n)</option>
+          <option value="lf" data-i18n="com.leLf">LF (\n)</option>
+          <option value="none" data-i18n="com.leNone">Yok</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-small" id="btn-com-save-settings" data-i18n="com.save">💾 Ayarları kaydet</button>
+        <button type="button" class="btn btn-small btn-action" id="btn-com-request-port" data-i18n="com.pickPort">🔎 Port seç ve bağlan</button>
+        <button type="button" class="btn btn-small" id="btn-com-granted-port" data-i18n="com.reusePort">↻ Son izinli porta bağlan</button>
+        <button type="button" class="btn btn-small btn-secondary" id="btn-com-disconnect" data-i18n="com.disconnect">⏏ Bağlantıyı kes</button>
+        <button type="button" class="btn btn-small btn-secondary" id="btn-com-modal-close" data-i18n="modal.close">Kapat</button>
+      </div>
+      <p id="com-modal-message" class="com-modal-message" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
