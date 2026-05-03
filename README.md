@@ -15,11 +15,10 @@ it has included bluetoot HC06 module compatibility
 Board Pin Numbers 
 PinNumbers_For_ArduinoMega.txt
 
-AX	1	2	3	4	5	6
----------------------------------------------------
-PUL	45	41	37	A0	46	A6	
-DIR	43	39	35	A1	48	A7
-EN	33	33	33	38	A2	A8
+AX	  1	  2	    3	    4	    5	    6
+EN   45	  41	  37	  A0	  46	  A6	
+DIR	  43  39	  35	  A1	  48	  A7
+EN	  33	33	  33	  38	  A2	  A8
 
 RX TX
 19 18
