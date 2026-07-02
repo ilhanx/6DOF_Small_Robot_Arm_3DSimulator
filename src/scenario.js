@@ -29,6 +29,9 @@ export class ScenarioManager {
       cartesianLockValue: Number.isFinite(step.cartesianLockValue) ? step.cartesianLockValue : undefined,
       label: step.label || 'Step ' + (this.steps.length + 1),
     };
+    if (Number.isFinite(step.linearSmoothFactor)) s.linearSmoothFactor = step.linearSmoothFactor;
+    if (Number.isFinite(step.linearMaxJointStep)) s.linearMaxJointStep = step.linearMaxJointStep;
+    if (Number.isFinite(step.linearMinDurationSec)) s.linearMinDurationSec = step.linearMinDurationSec;
     this.steps.push(s);
     return this.steps.length - 1;
   }
@@ -55,7 +58,7 @@ export class ScenarioManager {
   _normalizeImportedStep(step, index) {
     const raw = step && typeof step === 'object' ? step : {};
     const type = raw.type === 'linear' ? 'linear' : 'joint';
-    return {
+    const out = {
       type,
       target: { ...(raw.target || {}) },
       moveSpeed: raw.moveSpeed ?? ROBOT_CONFIG.speed.defaultMove,
@@ -66,6 +69,10 @@ export class ScenarioManager {
       cartesianLockValue: Number.isFinite(raw.cartesianLockValue) ? raw.cartesianLockValue : undefined,
       label: raw.label || `Step ${index + 1}`
     };
+    if (Number.isFinite(raw.linearSmoothFactor)) out.linearSmoothFactor = raw.linearSmoothFactor;
+    if (Number.isFinite(raw.linearMaxJointStep)) out.linearMaxJointStep = raw.linearMaxJointStep;
+    if (Number.isFinite(raw.linearMinDurationSec)) out.linearMinDurationSec = raw.linearMinDurationSec;
+    return out;
   }
 
   /**
@@ -157,11 +164,31 @@ export class ScenarioManager {
       cartesianLockAxis: step.cartesianLockAxis,
       cartesianLockValue: step.cartesianLockValue,
     };
+    if (Number.isFinite(step.linearSmoothFactor)) opts.linearSmoothFactor = step.linearSmoothFactor;
+    if (Number.isFinite(step.linearMaxJointStep)) opts.linearMaxJointStep = step.linearMaxJointStep;
+    if (Number.isFinite(step.linearMinDurationSec)) opts.linearMinDurationSec = step.linearMinDurationSec;
 
     this.planner.onComplete = () => {
       const stepDone = this.steps[this.currentIndex];
       const plannedLast = this.planner.getLastAngles?.();
-      const nextAngles = plannedLast || (stepDone.type === 'joint' ? stepDone.target : currentAngles);
+      let nextAngles = plannedLast;
+      if (!nextAngles) {
+        if (stepDone.type === 'joint') {
+          nextAngles = stepDone.target;
+        } else {
+          nextAngles = this.planner.computeLinearEndAngles(currentAngles, stepDone.target, {
+            moveSpeed: stepDone.moveSpeed,
+            accelSpeed: stepDone.accelSpeed,
+            decelSpeed: stepDone.decelSpeed,
+            ikOptions: stepDone.ikOptions,
+            cartesianLockAxis: stepDone.cartesianLockAxis,
+            cartesianLockValue: stepDone.cartesianLockValue,
+            linearSmoothFactor: stepDone.linearSmoothFactor,
+            linearMaxJointStep: stepDone.linearMaxJointStep,
+            linearMinDurationSec: stepDone.linearMinDurationSec,
+          });
+        }
+      }
       this.currentIndex++;
       void this._playStep(nextAngles);
     };

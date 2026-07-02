@@ -48,6 +48,7 @@ export class TargetTracker {
       maxJointStepDeg: 4,
       fixedJ4: this.j4TargetAngle,
       fixedJ5WorldPitchDeg: this.j5TargetAngle,
+      includeJ4J6InIkJacobian: true,
     });
 
     if (!ik.success && ik.error > 50) return currentAngles;

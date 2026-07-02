@@ -12,6 +12,7 @@ import { TrajectoryPlanner } from './trajectory.js';
 import { TargetTracker } from './tracking.js';
 import { CollisionChecker } from './collision.js';
 import { ScenarioManager } from './scenario.js';
+import { WorkspaceDrawingManager } from './workspaceDrawing.js';
 import { UIManager } from './ui.js';
 import { roundTo } from './utils.js';
 import {
@@ -26,6 +27,8 @@ import { getLang, setLang, subscribeLang, applyDomTranslations, t } from './i18n
 
 // Slider ile eklem: her karede hedefe kalan farkın bu kadarını kapat (1 = anında). %75 yavaşlatma → 0.25
 const MANUAL_JOINT_LERP = 0.25;
+/** Senaryo oynatırken pozisyon paneli güncellemesi (DOM / FK) — her kare yerine seyrek. */
+let scenarioPlaybackUiTick = 0;
 
 // =================== APPLICATION STATE ===================
 const state = {
@@ -42,9 +45,7 @@ function applyAnglesToRobotAndUI(angles, options = {}) {
   robot.setAngles(state.angles);
   const skipSliders = options.skipSliders === true;
   ui.updateAngles(state.angles, { skipSliders });
-  if (!skipSliders) {
-    state.manualJointTarget = { ...state.angles };
-  }
+  state.manualJointTarget = { ...state.angles };
 }
 
 const PLOTTER_Y = 20.0;
@@ -52,10 +53,6 @@ const PLOTTER_X_MIN = -150.0;
 const PLOTTER_X_MAX = 150.0;
 const PLOTTER_Z_MIN = -300.0;
 const PLOTTER_Z_MAX = 0.0;
-const BOUNDS_TEMPLATE_X1 = -70.0;
-const BOUNDS_TEMPLATE_X2 = 70.0;
-const BOUNDS_TEMPLATE_Z1 = -20.0;
-const BOUNDS_TEMPLATE_Z2 = -110.0;
 
 // =================== THREE.JS SCENE SETUP ===================
 const container = document.getElementById('viewport-3d');
@@ -417,6 +414,8 @@ scene.add(tcpHandle);
 
 // Mouse sürükleme state
 let isDraggingTCP = false;
+/** Yeşil TCP sürüklemesi başladığında kilitle — IK/refine J6’yı oynamasın */
+let tcpDragLockedJ6 = null;
 let isDraggingTarget = false;
 let wasAutoIKEnabledBeforeDrag = false;
 let isTargetTransformArmed = false;
@@ -509,6 +508,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     if (transformControlsHelper) transformControlsHelper.visible = false;
 
     isDraggingTCP = true;
+    tcpDragLockedJ6 = clampAngle('j6', state.angles.j6);
     renderer.domElement.setPointerCapture(event.pointerId);
     orbitControls.enabled = false;
     // Sürükleme düzlemi — kameraya dik, TCP noktasında
@@ -524,6 +524,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
 
 // Mouse MOVE — sürükleme
 renderer.domElement.addEventListener('pointermove', (event) => {
+  workspaceDrawing?.onPointerMove(event);
   if (isDraggingTarget) {
     getMouseNDC(event);
     raycaster.setFromCamera(mouse, camera);
@@ -580,6 +581,8 @@ renderer.domElement.addEventListener('pointermove', (event) => {
       tolerance: 1.2,
       fixedJ4: ui.getJ4TargetAngle(),
       fixedJ5WorldPitchDeg: ui.getJ5TargetAngle(),
+      includeJ4J6InIkJacobian: true,
+      fixedJ6: tcpDragLockedJ6,
     };
     if (ui.getTcpDragLockJ1()) {
       ikDragOpts.fixedJ1 = state.angles.j1;
@@ -587,7 +590,8 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     const result = solveIKWithReachFallback(target, state.angles, ikDragOpts);
 
     if (result.success) {
-      applyAnglesToRobotAndUI(result.angles);
+      const aligned = kinematics.refineTcpParallelWorldAxes(result.angles, target, ikDragOpts);
+      applyAnglesToRobotAndUI(aligned);
       updatePositionDisplay();
       updateOutput();
     }
@@ -607,6 +611,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
 
   if (isDraggingTCP) {
     isDraggingTCP = false;
+    tcpDragLockedJ6 = null;
     if (renderer.domElement.hasPointerCapture(event.pointerId)) {
       renderer.domElement.releasePointerCapture(event.pointerId);
     }
@@ -634,6 +639,200 @@ const tracker = new TargetTracker(kinematics);
 const collision = new CollisionChecker(kinematics);
 const scenario = new ScenarioManager(planner);
 const ui = new UIManager();
+
+let workspaceDrawing = null;
+
+function getDrawTool() {
+  const el = document.querySelector('#draw-tool-grid .draw-tool-btn.is-active-draw-tool');
+  return el?.dataset?.drawTool || 'none';
+}
+
+function syncOrbitForDrawTool() {
+  const active = workspaceDrawing?.isDrawingActive?.() === true;
+  orbitControls.enableRotate = !active;
+}
+
+const DRAW_PLANE_Z = -150;
+const DRAW_PLANE_X = 0;
+/** Simultane COM: bir TCP düz hattı için en fazla ara simcom (Arduino her simcom’da eklem düz hattı). */
+const SIMULTANE_LINEAR_MAX_SIMCOM = 26;
+
+function distTcpMm(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function dedupeOpenRing(ring, epsMm) {
+  const out = [];
+  for (const p of ring) {
+    const q = { x: p.x, y: p.y, z: p.z };
+    if (!out.length || distTcpMm(out[out.length - 1], q) > epsMm) out.push(q);
+  }
+  return out;
+}
+
+/** Kapalı yolda son=ilk köşe bitişikliğini bozmadan tekrarları kaldırır. */
+function dedupeDrawPathPoints(path, closed, epsMm = 0.35) {
+  if (!path?.length) return path;
+  if (
+    closed &&
+    path.length >= 2 &&
+    distTcpMm(path[0], path[path.length - 1]) <= epsMm + 0.05
+  ) {
+    const ring = path.slice(0, -1);
+    const ded = dedupeOpenRing(ring, epsMm);
+    if (ded.length < 2) return path;
+    return [...ded, { ...ded[0] }];
+  }
+  return dedupeOpenRing(path, epsMm);
+}
+
+/**
+ * Çizim köşesi: hedefi kaydırmayan IK (reach-fallback yok) + FK TCP rafine.
+ * Yeşil küre = FK ucu; çizim düzlemiyle aynı (x,y,z) mm hedefi.
+ */
+function solveIkStrictForDrawWaypoint(target, seedAngles, ikOpts) {
+  const primary = kinematics.solveIK(target, seedAngles, {
+    maxIterations: 280,
+    tolerance: 0.5,
+    ...ikOpts,
+  });
+  if (!primary.success || primary.error > 0.62) return null;
+  let a = clampAllAngles({ ...primary.angles });
+  for (let i = 0; i < 6; i++) {
+    const fk = kinematics.computeFK(a);
+    const err = distTcpMm(fk.position, target);
+    if (err < 0.1) return a;
+    const pol = kinematics.solveIK(target, a, {
+      maxIterations: 200,
+      tolerance: 0.035,
+      ...ikOpts,
+    });
+    if (!pol.success) break;
+    a = clampAllAngles({ ...pol.angles });
+  }
+  return a;
+}
+
+function applyDrawnPathToScenario() {
+  if (!workspaceDrawing) return;
+  const raw = workspaceDrawing.getLastRobotWaypointPath();
+  if (!raw?.path?.length || raw.path.length < 2) {
+    ui.showIKStatus(t('draw.errNoPath'), 'error');
+    return;
+  }
+  let path = dedupeDrawPathPoints(raw.path, raw.closed === true);
+  if (path.length < 2) {
+    ui.showIKStatus(t('draw.errNoPath'), 'error');
+    return;
+  }
+  planner.stop();
+  scenario.stop();
+  scenario.clearSteps();
+  const speeds = ui.getSpeedSettings();
+  const plotterIkOptions = {
+    fixedJ4: ui.getJ4TargetAngle(),
+    fixedJ5WorldPitchDeg: ui.getJ5TargetAngle(),
+  };
+  let currentAngles = { ...state.angles };
+  let failCount = 0;
+  for (const p of path) {
+    const sol = solveIkStrictForDrawWaypoint(p, currentAngles, plotterIkOptions);
+    if (!sol) {
+      failCount++;
+      continue;
+    }
+    const fk = kinematics.computeFK(sol);
+    if (distTcpMm(fk.position, p) > 0.28) {
+      failCount++;
+      continue;
+    }
+    const jointTarget = clampAllAngles({ ...sol });
+    scenario.addStep({
+      type: 'joint',
+      target: jointTarget,
+      moveSpeed: speeds.moveSpeed,
+      accelSpeed: speeds.accelSpeed,
+      decelSpeed: speeds.decelSpeed,
+      label: t('draw.stepLabel'),
+    });
+    currentAngles = jointTarget;
+  }
+  syncStepCountElement();
+  updateStepProgressDisplay(0, scenario.steps.length);
+  stepCursor = -1;
+  updateOutput({ force: true });
+  if (!scenario.steps.length) {
+    ui.showIKStatus(t('draw.errNoIk'), 'error');
+    return;
+  }
+  if (failCount > 0) {
+    ui.showIKStatus(t('draw.appliedWarn', { steps: scenario.steps.length, fail: failCount }), 'warning');
+  } else {
+    ui.showIKStatus(t('draw.appliedOk', { steps: scenario.steps.length }), 'success');
+  }
+}
+
+workspaceDrawing = new WorkspaceDrawingManager({
+  scene,
+  camera,
+  getCanvas: () => renderer.domElement,
+  getPlane: () => document.getElementById('draw-workspace-plane')?.value || 'xz',
+  getTool: getDrawTool,
+  getPathSamples: () => {
+    const v = parseInt(document.getElementById('draw-path-samples')?.value || '3', 10);
+    return Number.isFinite(v) ? v : 3;
+  },
+  getSnapStep: () => 5,
+  bounds: {
+    plotterY: PLOTTER_Y,
+    planeZConst: DRAW_PLANE_Z,
+    planeXConst: DRAW_PLANE_X,
+    xMin: PLOTTER_X_MIN,
+    xMax: PLOTTER_X_MAX,
+    zMin: PLOTTER_Z_MIN,
+    zMax: PLOTTER_Z_MAX,
+    yMin: PLOTTER_Y,
+    yMax: 280,
+  },
+  t,
+  onToast: (msg, kind) => ui.showIKStatus(msg, kind),
+});
+
+document.querySelectorAll('#draw-tool-grid .draw-tool-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#draw-tool-grid .draw-tool-btn').forEach((b) => b.classList.remove('is-active-draw-tool'));
+    btn.classList.add('is-active-draw-tool');
+    syncOrbitForDrawTool();
+  });
+});
+document.getElementById('btn-draw-clear')?.addEventListener('click', () => {
+  workspaceDrawing?.clearAll();
+  ui.showIKStatus(t('draw.cleared'), 'success');
+});
+document.getElementById('btn-draw-apply-robot')?.addEventListener('click', () => {
+  applyDrawnPathToScenario();
+});
+document.getElementById('draw-workspace-plane')?.addEventListener('change', () => {
+  workspaceDrawing?.clearPlaneDraft();
+});
+
+renderer.domElement.addEventListener(
+  'pointerdown',
+  (event) => {
+    if (workspaceDrawing?.tryBeginShapeDrag(event)) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      return;
+    }
+    if (workspaceDrawing?.consumePointerDown(event)) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    }
+  },
+  true,
+);
+
+syncOrbitForDrawTool();
 
 function syncStepCountElement() {
   const el = document.getElementById('step-count');
@@ -1139,17 +1338,6 @@ document.getElementById('btn-clear-steps')?.addEventListener('click', () => {
   updateOutput({ force: true });
 });
 
-document.getElementById('btn-template-eight')?.addEventListener('click', () => {
-  generateTemplateTrajectory('eight');
-});
-
-document.getElementById('btn-template-plus')?.addEventListener('click', () => {
-  generateTemplateTrajectory('plus');
-});
-document.getElementById('btn-template-bounds')?.addEventListener('click', () => {
-  generateTemplateTrajectory('bounds');
-});
-
 document.getElementById('btn-gcode-clear')?.addEventListener('click', () => {
   const el = document.getElementById('gcode-input');
   if (el) el.value = '';
@@ -1187,6 +1375,7 @@ function startScenarioPlayback() {
     tracker.disable();
   }
 
+  scenarioPlaybackUiTick = 0;
   scenario.onBeforeStepPlay = async (stepIndex, step, startAngles) => {
     const simultane = document.getElementById('player-com-simultane')?.checked;
     if (!simultane) return;
@@ -1194,20 +1383,13 @@ function startScenarioPlayback() {
       ui.showIKStatus(t('warn.simultaneNoCom'), 'warning');
       return;
     }
-    const finalAngles = resolveStepFinalAngles(step, startAngles);
-    if (!finalAngles) return;
-    const queue = buildArduinoQueueForStepMotion(
-      { finalAngles, moveSpeed: step.moveSpeed ?? ui.getSpeedSettings().moveSpeed },
-      {
-        prependStartPos: stepIndex === 0,
-        stepLabel: `Adım ${stepIndex + 1}`,
-      }
-    );
+    const queue = buildComQueueForScenarioStep(step, startAngles, stepIndex);
     if (!queue.length) return;
     if (isComWriteInProgress) return;
+    const gapMs = queue.length > 1 ? 12 : 1100;
     isComWriteInProgress = true;
     try {
-      await transmitComCommandQueue(queue, { writeLogFile: false });
+      await transmitComCommandQueue(queue, { writeLogFile: false, commandGapMs: gapMs });
     } catch {
       /* Hata mesajı transmitComCommandQueue içinde */
     } finally {
@@ -1216,10 +1398,15 @@ function startScenarioPlayback() {
   };
 
   planner.onUpdate = (angles, progress) => {
-    applyAnglesToRobotAndUI(angles);
-    updatePositionDisplay();
-    // updateOutput() her frame çağrıldığında ağır IK hesapları nedeniyle player yavaşlıyor.
-    // Oynatım sırasında atla; bitişte tek sefer güncelle.
+    applyAnglesToRobotAndUI(angles, { skipSliders: true });
+    const fk = kinematics.computeFK(state.angles);
+    if (!scenario.isPlaying || scenarioPlaybackUiTick % 4 === 0) {
+      ui.updatePosition(fk.position, fk.orientation);
+    }
+    scenarioPlaybackUiTick++;
+    if (!isDraggingTCP) {
+      tcpHandle.position.set(fk.position.x, fk.position.y, fk.position.z);
+    }
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = Math.round(progress * 100);
   };
@@ -1237,6 +1424,8 @@ scenario.onStepChange = (index) => {
 };
 scenario.onPlayComplete = () => {
   scenario.onBeforeStepPlay = null;
+  state.manualJointTarget = { ...state.angles };
+  ui.updateAngles(state.angles, { skipSliders: false });
   if (wasAutoIKEnabledBeforePlay) {
     tracker.enable();
     tracker.setTarget(ui.getTargetTCP());
@@ -1248,14 +1437,92 @@ function resolveStepFinalAngles(step, startAngles) {
   if (!step) return null;
   if (step.type === 'joint') return clampAllAngles(step.target || {});
   if (step.type === 'linear') {
-    const ik = solveIKWithReachFallback(step.target, startAngles, {
-      maxIterations: 120,
-      tolerance: 1.2,
-      ...(step.ikOptions || {})
-    });
-    return ik.success ? clampAllAngles(ik.angles) : null;
+    return planner.computeLinearEndAngles(startAngles, step.target, buildPlannerOptsFromStep(step));
   }
   return null;
+}
+
+function buildPlannerOptsFromStep(step) {
+  const speeds = ui.getSpeedSettings();
+  const o = {
+    moveSpeed: step.moveSpeed ?? speeds.moveSpeed,
+    accelSpeed: step.accelSpeed ?? speeds.accelSpeed,
+    decelSpeed: step.decelSpeed ?? speeds.decelSpeed,
+    ikOptions: step.ikOptions,
+    cartesianLockAxis: step.cartesianLockAxis,
+    cartesianLockValue: step.cartesianLockValue,
+  };
+  if (Number.isFinite(step.linearSmoothFactor)) o.linearSmoothFactor = step.linearSmoothFactor;
+  if (Number.isFinite(step.linearMaxJointStep)) o.linearMaxJointStep = step.linearMaxJointStep;
+  if (Number.isFinite(step.linearMinDurationSec)) o.linearMinDurationSec = step.linearMinDurationSec;
+  return o;
+}
+
+function anglesFingerprint6(a) {
+  return ROBOT_CONFIG.jointKeys.map((k) => roundTo(a[k] || 0, 2).toFixed(2)).join(',');
+}
+
+function dedupeConsecutiveAnglePoses(seq) {
+  const out = [];
+  for (const a of seq) {
+    const c = clampAllAngles({ ...a });
+    if (!out.length || anglesFingerprint6(out[out.length - 1]) !== anglesFingerprint6(c)) out.push(c);
+  }
+  return out;
+}
+
+function subsampleMotionWaypointAngles(frames, maxWaypoints) {
+  if (!frames?.length) return [];
+  const n = frames.length;
+  if (n <= maxWaypoints) return dedupeConsecutiveAnglePoses(frames.map((f) => clampAllAngles({ ...f })));
+  const picked = [];
+  const last = n - 1;
+  for (let k = 0; k < maxWaypoints; k++) {
+    const idx = Math.round((k / (maxWaypoints - 1)) * last);
+    picked.push(clampAllAngles({ ...frames[idx] }));
+  }
+  return dedupeConsecutiveAnglePoses(picked);
+}
+
+/** Simultane COM: lineer adımda sim ile aynı ara yolu taklit eden simcom zinciri. */
+function buildComQueueForScenarioStep(step, startAngles, stepIndex) {
+  const speeds = ui.getSpeedSettings();
+  const movePct = clampSpeedPercent(step.moveSpeed ?? speeds.moveSpeed, speeds.moveSpeed);
+  const q = [];
+  if (stepIndex === 0) {
+    q.push({ command: 'startpos', label: 'Start pozisyonu' });
+  }
+  q.push({ command: `ss${movePct}`, label: `ss ${movePct}%` });
+
+  if (step.type === 'joint') {
+    const targetAngles = clampAllAngles(step.target || {});
+    const cmd = formatSimcomFromAngles(targetAngles).replace(/\s+/g, '');
+    q.push({ command: cmd, label: `Adım ${stepIndex + 1} ${cmd}` });
+    return q;
+  }
+
+  if (step.type === 'linear') {
+    const opts = buildPlannerOptsFromStep(step);
+    const frames = planner.getLinearMotionFrames(startAngles, step.target, opts);
+    if (!frames.length) {
+      const end = planner.computeLinearEndAngles(startAngles, step.target, opts);
+      const cmd = formatSimcomFromAngles(end).replace(/\s+/g, '');
+      q.push({ command: cmd, label: `Adım ${stepIndex + 1} ${cmd}` });
+      return q;
+    }
+    // frames[0] gerçek başlangıç açıları değil (ilk ara-IK); COM zinciri sim ile aynı başlasın diye startAngles ekle.
+    const startClamped = clampAllAngles({ ...startAngles });
+    const framesClamped = frames.map((f) => clampAllAngles({ ...f }));
+    const fullChain = dedupeConsecutiveAnglePoses([startClamped, ...framesClamped]);
+    const waypoints = subsampleMotionWaypointAngles(fullChain, SIMULTANE_LINEAR_MAX_SIMCOM);
+    for (let i = 0; i < waypoints.length; i++) {
+      const cmd = formatSimcomFromAngles(waypoints[i]).replace(/\s+/g, '');
+      q.push({ command: cmd, label: `Adım ${stepIndex + 1} w${i + 1}/${waypoints.length}` });
+    }
+    return q;
+  }
+
+  return [];
 }
 
 function moveSingleStep(direction) {
@@ -1278,11 +1545,7 @@ function moveSingleStep(direction) {
     return;
   }
 
-  const opts = {
-    moveSpeed: step.moveSpeed,
-    accelSpeed: step.accelSpeed,
-    decelSpeed: step.decelSpeed
-  };
+  const opts = buildPlannerOptsFromStep(step);
 
   planner.onUpdate = (angles) => {
     applyAnglesToRobotAndUI(angles);
@@ -1293,7 +1556,11 @@ function moveSingleStep(direction) {
     updateStepProgressDisplay(stepCursor + 1, scenario.steps.length);
     updateOutput({ force: true });
   };
-  planner.moveJoint({ ...state.angles }, targetAngles, opts);
+  if (step.type === 'linear') {
+    planner.moveLinear({ ...state.angles }, step.target, opts);
+  } else {
+    planner.moveJoint({ ...state.angles }, targetAngles, opts);
+  }
 }
 
 function jumpToBoundaryStep(which) {
@@ -1313,11 +1580,7 @@ function jumpToBoundaryStep(which) {
   scenario.stop();
   planner.stop();
 
-  const opts = {
-    moveSpeed: step.moveSpeed,
-    accelSpeed: step.accelSpeed,
-    decelSpeed: step.decelSpeed
-  };
+  const opts = buildPlannerOptsFromStep(step);
 
   planner.onUpdate = (angles) => {
     applyAnglesToRobotAndUI(angles);
@@ -1328,7 +1591,11 @@ function jumpToBoundaryStep(which) {
     updateStepProgressDisplay(stepCursor + 1, scenario.steps.length);
     updateOutput({ force: true });
   };
-  planner.moveJoint({ ...state.angles }, targetAngles, opts);
+  if (step.type === 'linear') {
+    planner.moveLinear({ ...state.angles }, step.target, opts);
+  } else {
+    planner.moveJoint({ ...state.angles }, targetAngles, opts);
+  }
 }
 
 document.getElementById('btn-pause')?.addEventListener('click', () => { scenario.pause(); });
@@ -1345,40 +1612,50 @@ document.getElementById('btn-stop')?.addEventListener('click', () => {
 
 function runIK() {
   const target = ui.getTargetTCP();
-  const targetJ4 = ui.getJ4TargetAngle();
-  const targetJ5 = ui.getJ5TargetAngle();
   const result = solveIKWithReachFallback(target, state.angles, {
-    maxIterations: 320,
-    tolerance: 0.7,
-    damping: 2.2,
-    fixedJ4: targetJ4,
-    fixedJ5WorldPitchDeg: targetJ5,
+    maxIterations: 380,
+    tolerance: 0.65,
+    damping: 2.15,
+    fixedJ4: ui.getJ4TargetAngle(),
+    fixedJ5WorldPitchDeg: ui.getJ5TargetAngle(),
+    includeJ4J6InIkJacobian: true,
+    maxJointStepDeg: 4.5,
   });
 
-  if (result.success) {
-    // IK hedefe giderken mevcut hız ayarlarını kullan
-    const speeds = ui.getSpeedSettings();
-    planner.onUpdate = (angles) => {
-      applyAnglesToRobotAndUI(angles);
-      updatePositionDisplay();
-      updateOutput();
-    };
-    planner.onComplete = () => {
-      ui.showIKStatus(result.message, 'success');
-    };
-    planner.moveJoint({ ...state.angles }, clampAllAngles(result.angles), speeds);
-  } else {
+  if (!result.success) {
     ui.showIKStatus(result.message, 'error');
+    return;
   }
+
+  const speeds = ui.getSpeedSettings();
+  planner.onUpdate = (angles) => {
+    applyAnglesToRobotAndUI(angles);
+    updatePositionDisplay();
+    updateOutput();
+  };
+  planner.onComplete = () => {
+    ui.showIKStatus(result.message, 'success');
+  };
+  planner.moveJoint({ ...state.angles }, clampAllAngles(result.angles), speeds);
 }
 
 /**
  * Hedef erişilemezse, TCP'den hedefe doğru en yakın erişilebilir noktayı bulur.
  * Böylece flanş ucunu sürüklerken hareket kilitlenmez.
+ *
+ * @param {boolean} [options.allowReachFallback] Varsayılan true. false ise yalnızca tam XYZ hedefi denenir.
  */
 function solveIKWithReachFallback(target, startAngles, options = {}) {
-  const direct = kinematics.solveIK(target, startAngles, options);
+  const allowReachFallback = options.allowReachFallback !== false;
+  const ikOpts = { ...options };
+  delete ikOpts.allowReachFallback;
+
+  const direct = kinematics.solveIK(target, startAngles, ikOpts);
   if (direct.success) return direct;
+
+  if (!allowReachFallback) {
+    return direct;
+  }
 
   const fk = kinematics.computeFK(startAngles);
   const tcp = fk.position;
@@ -1395,7 +1672,7 @@ function solveIKWithReachFallback(target, startAngles, options = {}) {
       y: tcp.y + dy * a,
       z: tcp.z + dz * a,
     };
-    const attempt = kinematics.solveIK(fallbackTarget, startAngles, options);
+    const attempt = kinematics.solveIK(fallbackTarget, startAngles, ikOpts);
     if (!bestAttempt || attempt.error < bestAttempt.error) {
       bestAttempt = attempt;
     }
@@ -1425,226 +1702,6 @@ function animateToAngles(targetAngles) {
     ui.showIKStatus(t('toast.motionDone'), 'success');
   };
   planner.moveJoint({ ...state.angles }, targetAngles, speeds);
-}
-
-function mapTemplatePoint(center, u, v) {
-  // Plotter alanı:
-  // - Zemin üstünde sabit 20mm (Y=20)
-  // - J2+ yönü ileri kabul edilir (simde yaklaşık -Z)
-  // - Çalışma alanı: 300mm x 300mm
-  const x = Math.max(PLOTTER_X_MIN, Math.min(PLOTTER_X_MAX, center.x + u));
-  const z = Math.max(PLOTTER_Z_MIN, Math.min(PLOTTER_Z_MAX, center.z - v));
-  return {
-    x,
-    y: PLOTTER_Y,
-    z,
-  };
-}
-
-function samplePolyline(points, targetCount) {
-  if (points.length < 2) return points;
-  const lengths = [0];
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    const dx = points[i].x - points[i - 1].x;
-    const dy = points[i].y - points[i - 1].y;
-    const dz = points[i].z - points[i - 1].z;
-    total += Math.sqrt(dx * dx + dy * dy + dz * dz);
-    lengths.push(total);
-  }
-  const result = [];
-  const n = Math.max(2, targetCount);
-  for (let k = 0; k < n; k++) {
-    const d = (k / (n - 1)) * total;
-    let idx = 1;
-    while (idx < lengths.length && lengths[idx] < d) idx++;
-    const i1 = Math.max(1, idx);
-    const i0 = i1 - 1;
-    const span = Math.max(1e-9, lengths[i1] - lengths[i0]);
-    const t = (d - lengths[i0]) / span;
-    result.push({
-      x: points[i0].x + (points[i1].x - points[i0].x) * t,
-      y: points[i0].y + (points[i1].y - points[i0].y) * t,
-      z: points[i0].z + (points[i1].z - points[i0].z) * t,
-    });
-  }
-  return result;
-}
-
-function sampleSegment(p0, p1, count) {
-  const n = Math.max(2, count);
-  const pts = [];
-  for (let i = 0; i < n; i++) {
-    const t = i / (n - 1);
-    pts.push({
-      x: p0.x + (p1.x - p0.x) * t,
-      y: p0.y + (p1.y - p0.y) * t,
-      z: p0.z + (p1.z - p0.z) * t,
-    });
-  }
-  return pts;
-}
-
-function getTemplatePoints(type, center, templateSettings) {
-  const sizeX = templateSettings.sizeX;
-  const sizeZ = templateSettings.sizeZ;
-  const steps = Math.max(2, templateSettings.steps);
-  // Plotter çalışma alanı (300x300) içinde merkez:
-  // X: [-150, 150], Z: [-300, 0]
-  // Varsayılan merkez ileri bölgede: (0, -150)
-  const plotterCenter = {
-    x: Math.max(PLOTTER_X_MIN, Math.min(PLOTTER_X_MAX, Number.isFinite(center.x) ? center.x : 0)),
-    y: PLOTTER_Y,
-    z: Math.max(PLOTTER_Z_MIN, Math.min(PLOTTER_Z_MAX, Number.isFinite(center.z) ? center.z : -150)),
-  };
-
-  if (type === 'bounds') {
-    // Sınır şablonu: net 4 kenarlı dörgen (köşe-köşe, kapalı yol)
-    return [
-      { x: BOUNDS_TEMPLATE_X1, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z1 },
-      { x: BOUNDS_TEMPLATE_X2, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z1 },
-      { x: BOUNDS_TEMPLATE_X2, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z2 },
-      { x: BOUNDS_TEMPLATE_X1, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z2 },
-      { x: BOUNDS_TEMPLATE_X1, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z1 },
-    ];
-  }
-
-  if (type === 'eight') {
-    const pts = [];
-    const a = sizeX / 2;
-    const b = sizeZ / 2;
-    const samples = steps;
-    for (let i = 0; i < samples; i++) {
-      const t = (i / samples) * Math.PI * 2;
-      const u = a * Math.sin(t);
-      const v = b * Math.sin(2 * t);
-      pts.push(mapTemplatePoint(plotterCenter, u, v));
-    }
-    return pts;
-  }
-
-  // plus
-  const rx = sizeX / 2;
-  const rz = sizeZ / 2;
-  const top = mapTemplatePoint(plotterCenter, 0, rz);
-  const bottom = mapTemplatePoint(plotterCenter, 0, -rz);
-  const left = mapTemplatePoint(plotterCenter, -rx, 0);
-  const right = mapTemplatePoint(plotterCenter, rx, 0);
-
-  // İki çizgi vuruşu: dikey ve yatay (merkezde kesişim)
-  const verticalCount = Math.max(2, Math.floor(steps / 2));
-  const horizontalCount = Math.max(2, steps - verticalCount);
-  const vertical = sampleSegment(top, bottom, verticalCount);
-  const centerPoint = mapTemplatePoint(plotterCenter, 0, 0);
-  // Artı işaretini çapraz kaçmadan tek sürekli yol olarak çiz:
-  // top -> center -> bottom -> center -> left -> center -> right
-  const hHalf = Math.max(2, Math.floor(horizontalCount / 2) + 1);
-  const centerToLeft = sampleSegment(centerPoint, left, hHalf);
-  const leftToCenter = sampleSegment(left, centerPoint, hHalf);
-  const centerToRight = sampleSegment(centerPoint, right, Math.max(2, horizontalCount - hHalf + 2));
-
-  const rawPath = [
-    ...vertical,
-    ...sampleSegment(bottom, centerPoint, Math.max(2, Math.floor(verticalCount / 2))).slice(1),
-    ...centerToLeft.slice(1),
-    ...leftToCenter.slice(1),
-    ...centerToRight.slice(1),
-  ];
-  // Şablon adım sayısı her zaman kullanıcı girdisiyle birebir eşleşsin.
-  return samplePolyline(rawPath, steps);
-}
-
-function generateTemplateTrajectory(type) {
-  const center = ui.getTargetTCP();
-  const templateSettings = ui.getTemplateSettings();
-  const points = getTemplatePoints(type, center, templateSettings);
-  const speeds = ui.getSpeedSettings();
-  // Plotter kafası: J5 daima yere doğru baksın.
-  const plotterIkOptions = { fixedJ5WorldPitchDeg: -90 };
-
-  scenario.clearSteps();
-
-  if (type === 'bounds' && points.length >= 2) {
-    // Sınır şablonu için kenarlar mutlaka eksenlere paralel kalsın:
-    // köşe yolunu adım sayısına göre yeniden örnekle, sonra IK ile joint'e çevir.
-    const closedCorners = [
-      { x: BOUNDS_TEMPLATE_X1, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z1 },
-      { x: BOUNDS_TEMPLATE_X2, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z1 },
-      { x: BOUNDS_TEMPLATE_X2, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z2 },
-      { x: BOUNDS_TEMPLATE_X1, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z2 },
-      { x: BOUNDS_TEMPLATE_X1, y: PLOTTER_Y, z: BOUNDS_TEMPLATE_Z1 },
-    ];
-    const cartesianPath = samplePolyline(closedCorners, Math.max(8, templateSettings.steps));
-
-    let currentAngles = { ...state.angles };
-    const fixedJ1 = state.angles.j1;
-    let failCount = 0;
-    for (const p of cartesianPath) {
-      const ik = solveIKWithReachFallback(p, currentAngles, {
-        maxIterations: 120,
-        tolerance: 1.2,
-        ...plotterIkOptions,
-        fixedJ1
-      });
-      if (ik.success) {
-        currentAngles = clampAllAngles(ik.angles);
-      } else {
-        failCount++;
-      }
-      scenario.addStep({
-        type: 'joint',
-        target: { ...currentAngles },
-        moveSpeed: speeds.moveSpeed,
-        accelSpeed: speeds.accelSpeed,
-        decelSpeed: speeds.decelSpeed,
-        label: 'Bounds edge'
-      });
-    }
-    syncStepCountElement();
-    updateStepProgressDisplay(0, scenario.steps.length);
-    stepCursor = -1;
-    updateOutput({ force: true });
-    if (failCount > 0) {
-      ui.showIKStatus(
-        t('template.boundsApprox', { steps: scenario.steps.length, fail: failCount }),
-        'success',
-      );
-    } else {
-      ui.showIKStatus(t('template.boundsOk', { steps: scenario.steps.length }), 'success');
-    }
-    return;
-  }
-
-  let currentAngles = { ...state.angles };
-
-  for (const p of points) {
-    // Erişilebilirlik ön kontrolü (akış sürekliliği için)
-    const ik = solveIKWithReachFallback(p, currentAngles, {
-      maxIterations: 120,
-      tolerance: 1.2,
-      ...plotterIkOptions
-    });
-    if (ik.success) {
-      currentAngles = clampAllAngles(ik.angles);
-    }
-    // Oynatımda bozulma/kararsızlık olmaması için şablonu precomputed joint olarak kaydet.
-    scenario.addStep({
-      type: 'joint',
-      target: { ...currentAngles },
-      moveSpeed: speeds.moveSpeed,
-      accelSpeed: speeds.accelSpeed,
-      decelSpeed: speeds.decelSpeed,
-      label: type === 'eight' ? 'Eight step' : type === 'plus' ? 'Plus step' : 'Bounds step'
-    });
-  }
-
-  syncStepCountElement();
-  updateStepProgressDisplay(0, scenario.steps.length);
-  stepCursor = -1;
-  updateOutput({ force: true });
-  const typeLabel =
-    type === 'eight' ? t('template.labelEight') : type === 'plus' ? t('template.labelPlus') : t('template.labelBounds');
-  ui.showIKStatus(t('template.created', { label: typeLabel, steps: scenario.steps.length }), 'success');
 }
 
 function updateStepProgressDisplay(currentIndex, totalSteps) {
@@ -1801,17 +1858,11 @@ function enumerateScenarioMotions(defaultMoveSpeed) {
     if (step.type === 'joint') {
       finalAngles = clampAllAngles(step.target || {});
     } else if (step.type === 'linear') {
-      const ik = solveIKWithReachFallback(
-        step.target,
-        previousTarget,
-        {
-          maxIterations: 120,
-          tolerance: 1.2,
-          ...(step.ikOptions || {})
-        }
-      );
-      if (!ik.success) continue;
-      finalAngles = clampAllAngles(ik.angles);
+      // Tek nokta IK ile değil: moveLinear ile aynı ara yol → kayıtlı uç açılar oynatımla tutarlı
+      finalAngles = planner.computeLinearEndAngles(previousTarget, step.target, {
+        ...buildPlannerOptsFromStep(step),
+        moveSpeed: step.moveSpeed ?? defaultMoveSpeed,
+      });
     } else {
       continue;
     }
@@ -2074,7 +2125,7 @@ async function syncSimulationToPresetComCommand(rawCmd) {
 
 async function transmitComCommandQueue(queue, options = {}) {
   const totalCommands = queue.length;
-  const commandGapMs = 1100;
+  const commandGapMs = Number.isFinite(options.commandGapMs) ? options.commandGapMs : 1100;
   const writeLogFile = options.writeLogFile !== false;
 
   let logSession = null;
@@ -2183,8 +2234,8 @@ function animate() {
   orbitControls.update();
   updateCameraAngleDisplay();
 
-  // TCP handle senkronizasyonu — sürüklemiyorken robot ucuna yapış
-  if (!isDraggingTCP) {
+  // TCP handle — senaryo oynatırken onUpdate zaten FK + konum yaptı (çift FK önlenir)
+  if (!isDraggingTCP && !scenario.isPlaying) {
     const fk = kinematics.computeFK(state.angles);
     tcpHandle.position.set(fk.position.x, fk.position.y, fk.position.z);
   }

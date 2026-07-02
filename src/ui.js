@@ -185,20 +185,6 @@ export class UIManager {
     return Number.isFinite(raw) ? raw : 0;
   }
 
-  getTemplateSettings() {
-    const sizeXRaw = parseFloat(document.getElementById('template-size-x')?.value || '100');
-    const sizeZRaw = parseFloat(document.getElementById('template-size-z')?.value || '100');
-    const stepsRaw = parseInt(document.getElementById('template-steps')?.value || '10', 10);
-    const planeRaw = (document.getElementById('template-plane')?.value || 'xz').toLowerCase();
-    const plane = planeRaw === 'xy' || planeRaw === 'xz' || planeRaw === 'yz' ? planeRaw : 'xz';
-    return {
-      sizeX: Math.max(10, Math.min(300, Number.isFinite(sizeXRaw) ? sizeXRaw : 100)),
-      sizeZ: Math.max(10, Math.min(300, Number.isFinite(sizeZRaw) ? sizeZRaw : 100)),
-      steps: Math.max(4, Math.min(200, Number.isFinite(stepsRaw) ? stepsRaw : 10)),
-      plane
-    };
-  }
-
   setTargetTCP(pos) {
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = roundTo(v, 2); };
     set('tcp-x', pos.x); set('tcp-y', pos.y); set('tcp-z', pos.z);

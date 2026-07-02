@@ -58,57 +58,171 @@ export class RobotArm {
     this.rootGroup = new THREE.Group();
     this.scene.add(this.rootGroup);
 
-    // ============ ZEMIN PLATFORMU ============
-    const basePlate = new THREE.Mesh(
-      new THREE.BoxGeometry(50, 5, 50),
+    // Küçük altıgen başlık vidalar (3B baskı taban — yan görünüm referansı)
+    const boltGeo = new THREE.CylinderGeometry(0.9, 1.1, 0.7, 6);
+    const addBolt = (parent, x, y, z, rotY = 0) => {
+      const bolt = new THREE.Mesh(boltGeo.clone(), blackMat);
+      bolt.rotation.order = 'YXZ';
+      bolt.rotation.y = rotY;
+      bolt.rotation.x = Math.PI / 2;
+      bolt.position.set(x, y, z);
+      bolt.castShadow = true;
+      parent.add(bolt);
+    };
+
+    // ============ ZEMIN + TABAN PLAKASI (koyu alt + turuncu üst) ============
+    // Turuncu üst plaka yüzeyi y=6 → J1 gövdesi (housing alt y=6) ile çakışır; j1 / FK ofseti değişmez
+    const baseStackLiftY = 1.5;
+    const baseUnderlay = new THREE.Mesh(
+      new THREE.BoxGeometry(58, 2.5, 135),
       darkMat
     );
-    basePlate.position.y = -2.5;
-    basePlate.castShadow = true;
-    basePlate.receiveShadow = true;
-    this.rootGroup.add(basePlate);
+    baseUnderlay.position.set(0, -1.25 + baseStackLiftY, 67.5);
+    baseUnderlay.castShadow = true;
+    baseUnderlay.receiveShadow = true;
+    this.rootGroup.add(baseUnderlay);
 
-    // ============ J1 — BASE (Roll, Y ekseni) ============
+    // Sabit taban: J1 dönerken turuncu plaka + arka NEMA / yükseltici dünya ekseninde sabit kalır
+    const rearNemaZ = 107;
+
+    const baseLip = new THREE.Mesh(
+      new THREE.BoxGeometry(48, 2, 130),
+      orangeMat
+    );
+    baseLip.position.set(0, 1 + baseStackLiftY, 67.5);
+    baseLip.castShadow = true;
+    baseLip.receiveShadow = true;
+    this.rootGroup.add(baseLip);
+
+    const basePlateTop = new THREE.Mesh(
+      new THREE.BoxGeometry(44, 2.5, 125),
+      orangeMat
+    );
+    basePlateTop.position.set(0, 3.25 + baseStackLiftY, 67.5);
+    basePlateTop.castShadow = true;
+    basePlateTop.receiveShadow = true;
+    this.rootGroup.add(basePlateTop);
+
+    const rearRiser = new THREE.Mesh(
+      new THREE.BoxGeometry(16, 5, 12),
+      orangeMat
+    );
+    rearRiser.position.set(0, 6.5 + baseStackLiftY, rearNemaZ);
+    rearRiser.castShadow = true;
+    this.rootGroup.add(rearRiser);
+
+    const rearMotorBody = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 26, 11),
+      darkMat
+    );
+    rearMotorBody.position.set(0, 19 + baseStackLiftY, rearNemaZ);
+    rearMotorBody.castShadow = true;
+    this.rootGroup.add(rearMotorBody);
+
+    const rearMotorTop = new THREE.Mesh(
+      new THREE.CylinderGeometry(5, 5, 2, 16),
+      metalMat
+    );
+    rearMotorTop.position.set(0, 33 + baseStackLiftY, rearNemaZ);
+    rearMotorTop.castShadow = true;
+    this.rootGroup.add(rearMotorTop);
+
+    // ============ J1 — BASE (Roll, Y ekseni) — dönen kısım: gövde + omuz bağlantısı ============
     const j1 = new THREE.Group();
     j1.position.y = 0;
     this.rootGroup.add(j1);
     this.joints.push(j1);
 
-    // Base gövdesi — silindirik kasnak
-    const baseBody = new THREE.Mesh(
-      new THREE.CylinderGeometry(20, 22, 22, 24),
+    // İlk eklem: iki paralel turuncu yan plaka (tabana doğru +Z’de uzatılmış köprü; yükseklik aynı)
+    const housingZ = 32;
+    const housingH = 26;
+    const housingY0 = 6;
+    const housingDepth = 88;
+    const housingPlateT = 2.8;
+    const housingX = 11.5;
+
+    const housingLeft = new THREE.Mesh(
+      new THREE.BoxGeometry(housingPlateT, housingH, housingDepth),
       orangeMat
     );
-    baseBody.position.y = 11;
-    baseBody.castShadow = true;
-    j1.add(baseBody);
+    housingLeft.position.set(-housingX, housingY0 + housingH / 2, housingZ);
+    housingLeft.castShadow = true;
+    j1.add(housingLeft);
 
-    // Base kasnak diski (üst)
-    const basePulleyDisc = new THREE.Mesh(
-      new THREE.CylinderGeometry(18, 18, 3, 24),
-      blackMat
+    const housingRight = new THREE.Mesh(
+      new THREE.BoxGeometry(housingPlateT, housingH, housingDepth),
+      orangeMat
     );
-    basePulleyDisc.position.y = 23;
-    basePulleyDisc.castShadow = true;
-    j1.add(basePulleyDisc);
+    housingRight.position.set(housingX, housingY0 + housingH / 2, housingZ);
+    housingRight.castShadow = true;
+    j1.add(housingRight);
 
-    // Base → Omuz bağlantı boynu (boşluğu kapatır)
+    // Plaka üzeri vidalar (fotoğraftaki siyah başlıklar)
+    for (let i = 0; i < 5; i++) {
+      const by = 9 + i * 4.2;
+      const bz = housingZ - housingDepth / 2 + 2.5;
+      addBolt(j1, -housingX - housingPlateT / 2 - 0.2, by, bz, 0);
+      addBolt(j1, housingX + housingPlateT / 2 + 0.2, by, bz, Math.PI);
+    }
+
+    // Gövde içi yatay motor (yan görünüm — mil X doğrultusunda)
+    const innerMotor = new THREE.Mesh(
+      new THREE.CylinderGeometry(4.5, 4.5, 14, 16),
+      darkMat
+    );
+    innerMotor.rotation.z = Math.PI / 2;
+    innerMotor.position.set(0, 13, housingZ);
+    innerMotor.castShadow = true;
+    j1.add(innerMotor);
+
+    const innerMotorRing = new THREE.Mesh(
+      new THREE.TorusGeometry(5.5, 0.6, 8, 20),
+      metalMat
+    );
+    innerMotorRing.rotation.y = Math.PI / 2;
+    innerMotorRing.position.set(0, 13, housingZ);
+    innerMotorRing.castShadow = true;
+    j1.add(innerMotorRing);
+
+    // Kablo demeti (zip tie yerine ince silindirler — mavi / yeşil / sarı)
+    const wireMat = (hex) =>
+      new THREE.MeshStandardMaterial({
+        color: hex,
+        metalness: 0.1,
+        roughness: 0.85,
+      });
+    const wirePositions = [
+      [-housingX - 1.2, 11, housingZ + 5],
+      [-housingX - 1.2, 12, housingZ + 5],
+      [-housingX - 1.2, 13, housingZ + 5],
+    ];
+    const wireColors = [0x3d6fb8, 0x4caf50, 0xc9b037];
+    for (let w = 0; w < wirePositions.length; w++) {
+      const wg = new THREE.CylinderGeometry(0.55, 0.55, 7, 8);
+      const wire = new THREE.Mesh(wg, wireMat(wireColors[w]));
+      wire.rotation.z = Math.PI / 2;
+      wire.position.set(...wirePositions[w]);
+      wire.castShadow = true;
+      j1.add(wire);
+    }
+
+    // Üst rulman / omuz geçişi — J2 (y=base_height) ile hizalı
     const baseNeck = new THREE.Mesh(
-      new THREE.CylinderGeometry(14, 16, 12, 20),
+      new THREE.CylinderGeometry(13, 15, 10, 22),
       orangeMat
     );
-    baseNeck.position.y = 29;
+    baseNeck.position.y = 30;
+    baseNeck.position.z = -1;
     baseNeck.castShadow = true;
     j1.add(baseNeck);
 
-    // Base motor gövdesi (yan)
-    const baseMotor = new THREE.Mesh(
-      new THREE.BoxGeometry(12, 15, 12),
-      metalMat
+    const basePulleyDisc = new THREE.Mesh(
+      new THREE.CylinderGeometry(16, 16, 2.5, 24),
+      blackMat
     );
-    baseMotor.position.set(22, 8, 0);
-    baseMotor.castShadow = true;
-    j1.add(baseMotor);
+    basePulleyDisc.position.set(0, 35.2, -1);
+    basePulleyDisc.castShadow = true;
+    j1.add(basePulleyDisc);
 
     // ============ J2 — OMUZ (Pitch, Z ekseni) ============
     // Çatal yapısı — Base'in üstünde iki dikey plaka
@@ -163,6 +277,37 @@ export class RobotArm {
     shoulderAxle.rotation.z = Math.PI / 2;
     shoulderAxle.position.set(0, 0, 0);
     j2.add(shoulderAxle);
+
+    // J2 — NEMA 22 omuz motoru: çatal plakanın +Z ucuna kadar, Z taşması yok (çatal derinliği 16 → z ∈ [-8, 8])
+    const forkHalfZ = 8;
+    const n22DepthZ = 9.5;
+    const n22Height = 28;
+    const n22WidthX = 13;
+    const j2NemaZ = forkHalfZ - n22DepthZ / 2;
+    const j2NemaBody = new THREE.Mesh(
+      new THREE.BoxGeometry(n22WidthX, n22Height, n22DepthZ),
+      darkMat
+    );
+    j2NemaBody.position.set(0, 14, j2NemaZ);
+    j2NemaBody.castShadow = true;
+    j2.add(j2NemaBody);
+
+    const j2NemaFace = new THREE.Mesh(
+      new THREE.BoxGeometry(n22WidthX - 1, n22Height - 4, 0.8),
+      metalMat
+    );
+    j2NemaFace.position.set(0, 14, forkHalfZ - 0.41);
+    j2NemaFace.castShadow = true;
+    j2.add(j2NemaFace);
+
+    const j2NemaRear = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.5, 3.5, 1.2, 16),
+      metalMat
+    );
+    j2NemaRear.rotation.x = Math.PI / 2;
+    j2NemaRear.position.set(0, 14, j2NemaZ - n22DepthZ / 2 + 0.6);
+    j2NemaRear.castShadow = true;
+    j2.add(j2NemaRear);
 
     // Üst kol gövdesi — iki paralel plaka (sandviç)
     const upperArmLeft = new THREE.Mesh(

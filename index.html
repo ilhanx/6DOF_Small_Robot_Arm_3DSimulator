@@ -113,35 +113,36 @@
         </div>
       </section>
 
-      <!-- Yörünge Şablon Ayarları -->
-      <section class="panel" id="panel-template-settings">
-        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.templateTitle">🧭 TRAJECTORY SETTINGS</span><button type="button" class="panel-info-btn" data-panel-help="panel-template-settings" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
-        <div class="input-group">
-          <div class="input-row">
-            <label>X</label>
-            <input type="number" id="template-size-x" value="100" min="10" max="300" step="1">
-            <span class="unit">mm</span>
-          </div>
-          <div class="input-row">
-            <label>Z</label>
-            <input type="number" id="template-size-z" value="100" min="10" max="300" step="1">
-            <span class="unit">mm</span>
-          </div>
-          <div class="input-row">
-            <label>N</label>
-            <input type="number" id="template-steps" value="10" min="4" max="200" step="1">
-            <span class="unit" data-i18n="unit.step">adım</span>
-          </div>
-          <div class="input-row">
-            <label>P</label>
-            <select id="template-plane" class="template-select">
-              <option value="xy">XY</option>
-              <option value="xz" selected>XZ</option>
-              <option value="yz">YZ</option>
+      <!-- Çalışma alanı çizim -->
+      <section class="panel" id="panel-draw-workspace">
+        <h2 class="panel-title"><span class="panel-title-text" data-i18n="panel.drawTitle">🖊 Çalışma alanı çizim</span><button type="button" class="panel-info-btn" data-panel-help="panel-draw-workspace" data-i18n-title="panel.infoTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button></h2>
+        <div class="draw-tool-grid" id="draw-tool-grid">
+          <button type="button" class="btn btn-small draw-tool-btn is-active-draw-tool" data-draw-tool="none" data-i18n="draw.toolNav">Taşı / bak</button>
+          <button type="button" class="btn btn-small draw-tool-btn" data-draw-tool="line" data-i18n="draw.toolLine">Çizgi</button>
+          <button type="button" class="btn btn-small draw-tool-btn" data-draw-tool="rect" data-i18n="draw.toolRect">Dörtgen</button>
+          <button type="button" class="btn btn-small draw-tool-btn" data-draw-tool="triangle" data-i18n="draw.toolTri">Üçgen</button>
+          <button type="button" class="btn btn-small draw-tool-btn" data-draw-tool="circle" data-i18n="draw.toolCircle">Daire</button>
+        </div>
+        <div class="input-group draw-workspace-inputs">
+          <div class="input-row draw-workspace-inputs-row">
+            <label data-i18n="draw.planeLabel">Düzlem</label>
+            <select id="draw-workspace-plane" class="template-select draw-plane-select">
+              <option value="xz" selected data-i18n="draw.planeXZ">XZ (yatay)</option>
+              <option value="xy" data-i18n="draw.planeXY">XY (Z sabit)</option>
+              <option value="yz" data-i18n="draw.planeYZ">YZ (X sabit)</option>
             </select>
-            <span class="unit" data-i18n="unit.plane">düzlem</span>
+          </div>
+          <div class="input-row draw-workspace-inputs-row">
+            <label data-i18n="draw.samplesLabel">Yol noktası</label>
+            <input type="number" id="draw-path-samples" class="draw-samples-input" value="3" min="2" max="200" step="1">
+            <span class="unit" data-i18n="draw.samplesUnit">adım</span>
           </div>
         </div>
+        <div class="draw-actions">
+          <button type="button" class="btn btn-small btn-secondary" id="btn-draw-clear" data-i18n="draw.btnClear" data-i18n-title="draw.btnClearTitle">Çizimleri sil</button>
+          <button type="button" class="btn btn-small btn-action" id="btn-draw-apply-robot" data-i18n="draw.btnApply" data-i18n-title="draw.btnApplyTitle">Çizimi Adımla</button>
+        </div>
+        <p class="panel-hint" data-i18n="draw.hint">Çizgi araçları: sol tık ile nokta (çizgi 2, dörtgen 2 köşe, üçgen 3, daire merkez+yarıçap). Shift: çizgide eksen. Alt: 5 mm ızgara. Esc: iptal. Taşı/bak: çizimin üzerindeyken Ctrl basılı tutup sürükleyerek taşı. Ctrl+Z: son şekli sil.</p>
       </section>
 
       <!-- G-code -->
@@ -256,9 +257,6 @@ G1 X-40 Y140 Z-30 F1200"></textarea>
     </div>
     <div class="scenario-section">
       <button class="btn btn-small" id="btn-add-step" data-i18n="footer.addStep" data-i18n-title="footer.addStepTitle">+ Adım Ekle</button>
-      <button class="btn btn-small" id="btn-template-eight" data-i18n="footer.eight" data-i18n-title="footer.eightTitle">∞ 8 Şablonu</button>
-      <button class="btn btn-small" id="btn-template-plus" data-i18n="footer.plus" data-i18n-title="footer.plusTitle">✚ + Şablonu</button>
-      <button class="btn btn-small" id="btn-template-bounds" data-i18n="footer.bounds" data-i18n-title="footer.boundsTitle">▭ Sınır Şablonu</button>
       <button class="btn btn-small" id="btn-save-json" data-i18n="footer.saveJson" data-i18n-title="footer.saveJsonTitle">💾 JSON Kaydet</button>
       <button class="btn btn-small" id="btn-save-output" data-i18n="footer.saveOutput" data-i18n-title="footer.saveOutputTitle">📝 Çıktı Kaydet</button>
       <label for="file-input-json" class="btn btn-small" id="btn-load-json" data-i18n="footer.loadJson" data-i18n-title="footer.loadJsonTitle">📂 JSON Yükle</label>
@@ -283,7 +281,10 @@ G1 X-40 Y140 Z-30 F1200"></textarea>
   <!-- COM / Web Serial ayarları -->
   <div id="com-settings-modal" class="modal-overlay" aria-hidden="true">
     <div class="modal-dialog com-modal" role="dialog" aria-labelledby="com-modal-title">
-      <h3 id="com-modal-title" class="modal-title" data-i18n="com.title">🔌 COM Port Ayarları</h3>
+      <h3 id="com-modal-title" class="modal-title com-modal-title-row">
+        <span data-i18n="com.title">🔌 COM Port Ayarları</span>
+        <button type="button" class="panel-info-btn" data-panel-help="panel-com-commands" data-i18n-title="header.comCommandsTitle" data-i18n-aria-label="panel.infoAria">ⓘ</button>
+      </h3>
       <p class="modal-hint" data-i18n="com.hint">Chrome veya Edge kullanın (Web Serial). Port seçimi güvenlik için her oturumda onay gerektirebilir.</p>
       <div class="com-status-row">
         <span data-i18n="com.statusLabel">Durum:</span>
@@ -330,6 +331,7 @@ G1 X-40 Y140 Z-30 F1200"></textarea>
         </select>
       </div>
       <div class="modal-actions">
+        <button type="button" class="btn btn-small panel-info-btn" data-panel-help="panel-com-commands" data-i18n="com.commandsHelp" data-i18n-title="header.comCommandsTitle">📖 Arduino komutları</button>
         <button type="button" class="btn btn-small" id="btn-com-save-settings" data-i18n="com.save">💾 Ayarları kaydet</button>
         <button type="button" class="btn btn-small btn-action" id="btn-com-request-port" data-i18n="com.pickPort">🔎 Port seç ve bağlan</button>
         <button type="button" class="btn btn-small" id="btn-com-granted-port" data-i18n="com.reusePort">↻ Son izinli porta bağlan</button>

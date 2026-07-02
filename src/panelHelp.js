@@ -44,15 +44,20 @@ const PANEL_HELP_TR = {
       <p><strong>Gönder</strong> ile seçili hızı Arduino’ya <code>ss…</code> komutu olarak COM’dan iletebilirsiniz (port açıkken).</p>
     `,
   },
-  'panel-template-settings': {
-    title: '🧭 Trajectory settings',
+  'panel-draw-workspace': {
+    title: '🖊 Çalışma alanı çizim',
     html: `
-      <p>Otomatik şablonlar (8, +, sınır) için çalışma alanı boyutu ve adım sayısı.</p>
+      <p><strong>Taşı / bak:</strong> Normal kamera dönüşü ve hedef/TCP sürükleme. Çizim aracı seçiliyken sol tuş sahne dönüşü yerine nokta koyar; orta tuş veya sağ tuş ile kamerayı hâlâ hareket ettirebilirsiniz.</p>
+      <p><strong>Çizgi / Dörtgen / Üçgen / Daire:</strong> Seçili düzlemde (XZ yatay çalışma yüzeyi, XY veya YZ dikey duvar) sol tıklayarak nokta koyarsınız.</p>
       <ul>
-        <li><strong>X, Z:</strong> Şeklin milimetre cinsinden tipik genişlik/yükseklik ölçeği.</li>
-        <li><strong>N:</strong> Yol üzerinde örneklenen ara nokta sayısı (daha fazla = daha pürüzsüz, daha ağır).</li>
-        <li><strong>P:</strong> Şeklin hangi düzlemde üretileceği (XY, XZ, YZ).</li>
+        <li><strong>Çizgi:</strong> iki tık. <strong>Shift</strong> ile ikinci nokta eksene hizalanır.</li>
+        <li><strong>Dörtgen:</strong> köşegen iki köşe.</li>
+        <li><strong>Üçgen:</strong> üç köşe.</li>
+        <li><strong>Daire:</strong> merkez + çember üzerinde bir nokta.</li>
       </ul>
+      <p><strong>Alt</strong> basılıyken tıklama: 5 mm ızgara. <strong>Esc</strong> yarım kalan çizimi iptal eder.</p>
+      <p><strong>Çizimi Adımla:</strong> Köşe sırası korunur. Her hedef için önce erişilebilirlik IK’sı (hedef kaydırılmaz) kontrol edilir; senaryo adımları <strong>eklem (joint)</strong> tipindedir — her köşe için çözülen j1–j6 hedefleri kaydedilir; oynatırken TCP’nin düz hat izlemesi garanti edilmez. Dairede yol <strong>Yol noktası</strong> ile örneklenir.</p>
+      <p><strong>Ctrl+Z:</strong> Son çizilen şekli kaldırır. <strong>Taşı / bak</strong> modunda fare çizginin üzerindeyken <strong>Ctrl</strong> basılı tutarak sol tıklayıp sürükleyin; böylece tüm şekil düzlem içinde kayar (Ctrl yoksa sadece kamera döner).</p>
     `,
   },
   'panel-gcode': {
@@ -91,6 +96,55 @@ const PANEL_HELP_TR = {
     html: `
       <p>Senaryo ve hareketlerden üretilen <strong>simcom…</strong> satırları veya kopyaladığınız Arduino/C metni burada görünür.</p>
       <p><strong>Kopyala</strong> panoya alır. <strong>Gönder</strong> satırları sırayla COM’dan iletir; <code>home</code> ve <code>startpos</code> satırları simülatörü de ilgili konfig pozisyonuna götürür.</p>
+      <p>Tüm Arduino seri komutları için <strong>COM Ayarları</strong> penceresindeki <strong>Arduino komutları</strong> veya başlıktaki ⓘ düğmesine bakın.</p>
+    `,
+  },
+  'panel-com-commands': {
+    title: '📖 Arduino seri komutları',
+    html: `
+      <p><strong>Baud:</strong> Arduino firmware varsayılanı <code>9600</code> (USB Serial ve Bluetooth Serial1). COM ayarlarında baud’u buna uygun seçin.</p>
+      <p>Komutlar satır sonu (<code>\\r</code> veya <code>\\n</code>) ile biter; Web Serial’de satır sonu yoksa kısa sessizlikte paket kapanır.</p>
+      <h4>Motor / sistem</h4>
+      <ul>
+        <li><code>enable</code> — motor sürücüleri aktif</li>
+        <li><code>disable</code> — motor sürücüleri kapalı</li>
+      </ul>
+      <h4>Hız</h4>
+      <ul>
+        <li><code>ss</code> + 0–100 — hareket hızı yüzdesi. Örnek: <code>ss75</code></li>
+      </ul>
+      <h4>Tek eklem (eklem uzayında düz hat)</h4>
+      <p>Diğer eklemler sabit kalır; yalnızca ilgili eklem hedefe gider.</p>
+      <ul>
+        <li><code>s1</code> + açı — J1 (°). Örnek: <code>s145</code>, <code>s1-10</code></li>
+        <li><code>s2</code> + açı — J2</li>
+        <li><code>s3</code> + açı — J3</li>
+        <li><code>s4</code> + açı — J4</li>
+        <li><code>s5</code> + açı — J5</li>
+        <li><code>s6</code> + açı — J6</li>
+      </ul>
+      <h4>Simülatörden gelen eklem hareketi (ana kullanım)</h4>
+      <ul>
+        <li><code>simcom</code> + j1,j2,j3,j4,j5,j6 — virgülle ayrılmış 6 açı (°). Örnek: <code>simcom0.00,-78.51,73.90,0.00,-90.00,0.00</code></li>
+      </ul>
+      <p>Simülatör <strong>Çıktı</strong> paneli, <strong>Eklem Gönder</strong> ve senaryo oynatıcı bu formatı üretir.</p>
+      <h4>Kayıtlı yol / demo</h4>
+      <ul>
+        <li><code>save</code> + hız% — mevcut konumu kaydeder, sonraki segment hızını ayarlar. Örnek: <code>save50</code></li>
+        <li><code>reset</code> — kayıt indeksini sıfırlar</li>
+        <li><code>run</code> — <code>save</code> ile kaydedilen noktalar arasında oynatır</li>
+        <li><code>home</code> — home pozisyonu, sonra <code>disable</code></li>
+        <li><code>startpos</code> — başlangıç pozisyonu</li>
+        <li><code>move1</code>, <code>move2</code> — yerleşik demo hareketleri</li>
+      </ul>
+      <h4>Örnek akış</h4>
+      <pre><code>enable
+ss75
+startpos
+simcom0.00,0.00,0.00,0.00,90.00,0.00
+home
+disable</code></pre>
+      <p>Simülatör COM <strong>Gönder</strong> ile tanınan satırlar: <code>startpos</code>, <code>home</code>, <code>ss…</code>, <code>s1…s6</code>, <code>simcom…</code>.</p>
     `,
   },
 };
@@ -137,15 +191,20 @@ const PANEL_HELP_EN = {
       <p><strong>Send</strong> transmits the selected speed to the Arduino as an <code>ss…</code> command over COM (when the port is open).</p>
     `,
   },
-  'panel-template-settings': {
-    title: '🧭 Trajectory settings',
+  'panel-draw-workspace': {
+    title: '🖊 Workspace drawing',
     html: `
-      <p>Workspace size and sample count for automatic templates (eight, plus, bounds).</p>
+      <p><strong>Navigate:</strong> Normal orbit and target/TCP dragging. With no drawing tool selected you can rotate the view with the left mouse button.</p>
+      <p><strong>Line / Rectangle / Triangle / Circle:</strong> Left-click on the chosen plane (XZ horizontal work surface at Y=20 mm, XY or YZ vertical wall).</p>
       <ul>
-        <li><strong>X, Z:</strong> Typical width/height scale of the shape in millimetres.</li>
-        <li><strong>N:</strong> Number of intermediate samples along the path (more = smoother, heavier).</li>
-        <li><strong>P:</strong> Plane in which the shape is generated (XY, XZ, YZ).</li>
+        <li><strong>Line:</strong> two clicks. Hold <strong>Shift</strong> on the second click to snap to the dominant axis.</li>
+        <li><strong>Rectangle:</strong> two opposite corners.</li>
+        <li><strong>Triangle:</strong> three corners.</li>
+        <li><strong>Circle:</strong> center, then a point on the radius.</li>
       </ul>
+      <p>Hold <strong>Alt</strong> while clicking for a 5 mm grid. <strong>Esc</strong> cancels an in-progress shape.</p>
+      <p><strong>Step drawing:</strong> Keeps vertex order. Each waypoint is checked with strict IK (no reach nudge). Scenario steps are <strong>joint</strong> moves — solved j1–j6 targets per corner are saved; playback does not guarantee a straight TCP path between corners. Circles use <strong>Path samples</strong>.</p>
+      <p><strong>Ctrl+Z:</strong> Removes the last drawn shape. In <strong>Navigate</strong> mode, hold <strong>Ctrl</strong> with the pointer on a stroke, then left-drag to move the whole shape within the plane (without Ctrl you only orbit the camera).</p>
     `,
   },
   'panel-gcode': {
@@ -184,6 +243,55 @@ const PANEL_HELP_EN = {
     html: `
       <p><strong>simcom…</strong> lines from the scenario and motions, or Arduino/C text you paste, appear here.</p>
       <p><strong>Copy</strong> copies to the clipboard. <strong>Send</strong> transmits lines in order over COM; <code>home</code> and <code>startpos</code> lines also move the simulator to the configured poses.</p>
+      <p>For the full Arduino serial command list, open <strong>COM settings</strong> and use <strong>Arduino commands</strong> or the ⓘ button in the title bar.</p>
+    `,
+  },
+  'panel-com-commands': {
+    title: '📖 Arduino serial commands',
+    html: `
+      <p><strong>Baud:</strong> Arduino firmware default is <code>9600</code> (USB Serial and Bluetooth Serial1). Match this in COM settings.</p>
+      <p>Commands end with a line break (<code>\\r</code> or <code>\\n</code>); without a line ending, Web Serial may close the packet after a short idle gap.</p>
+      <h4>Motor / system</h4>
+      <ul>
+        <li><code>enable</code> — enable motor drivers</li>
+        <li><code>disable</code> — disable motor drivers</li>
+      </ul>
+      <h4>Speed</h4>
+      <ul>
+        <li><code>ss</code> + 0–100 — speed percentage. Example: <code>ss75</code></li>
+      </ul>
+      <h4>Single joint (joint-space straight line)</h4>
+      <p>Other joints stay fixed; only the selected joint moves to the target.</p>
+      <ul>
+        <li><code>s1</code> + angle — J1 (°). Example: <code>s145</code>, <code>s1-10</code></li>
+        <li><code>s2</code> + angle — J2</li>
+        <li><code>s3</code> + angle — J3</li>
+        <li><code>s4</code> + angle — J4</li>
+        <li><code>s5</code> + angle — J5</li>
+        <li><code>s6</code> + angle — J6</li>
+      </ul>
+      <h4>Simulator joint move (primary use)</h4>
+      <ul>
+        <li><code>simcom</code> + j1,j2,j3,j4,j5,j6 — six comma-separated angles (°). Example: <code>simcom0.00,-78.51,73.90,0.00,-90.00,0.00</code></li>
+      </ul>
+      <p>The <strong>Output</strong> panel, <strong>Send joints</strong>, and scenario player generate this format.</p>
+      <h4>Recorded path / demos</h4>
+      <ul>
+        <li><code>save</code> + speed% — save current pose and set next segment speed. Example: <code>save50</code></li>
+        <li><code>reset</code> — clear record index</li>
+        <li><code>run</code> — play poses saved with <code>save</code></li>
+        <li><code>home</code> — home pose, then <code>disable</code></li>
+        <li><code>startpos</code> — start position</li>
+        <li><code>move1</code>, <code>move2</code> — built-in demo motions</li>
+      </ul>
+      <h4>Example sequence</h4>
+      <pre><code>enable
+ss75
+startpos
+simcom0.00,0.00,0.00,0.00,90.00,0.00
+home
+disable</code></pre>
+      <p>Simulator COM <strong>Send</strong> recognizes: <code>startpos</code>, <code>home</code>, <code>ss…</code>, <code>s1…s6</code>, <code>simcom…</code>.</p>
     `,
   },
 };

@@ -208,6 +208,7 @@ export class Kinematics {
     a[jointKey] = clampAngle(jointKey, baseAngles[jointKey] + offsetDeg);
     if (ctx.hasFixedJ1) a.j1 = ctx.fixedJ1;
     if (ctx.hasFixedJ4) a.j4 = ctx.fixedJ4;
+    if (ctx.hasFixedJ6) a.j6 = ctx.fixedJ6;
     if (ctx.hasFixedJ5) {
       a.j5 = ctx.fixedJ5;
     } else if (ctx.hasFixedJ5WorldPitch && (jointKey === 'j2' || jointKey === 'j3')) {
@@ -224,6 +225,7 @@ export class Kinematics {
    * Çıktı: { success, angles, error, iterations, message }
    *
    * options.damping: λ skaleri (yüksek → daha yumuşak adım)
+   * options.includeJ4J6InIkJacobian: true ise (kilitsizse) j4/j6 Jacobian'a eklenir — TCP sürüklerken pozisyon+j6 birlikte.
    */
   solveIK(target, currentAngles, options = {}) {
     const maxIterations = options.maxIterations ?? 220;
@@ -237,6 +239,8 @@ export class Kinematics {
     const fixedJ1 = hasFixedJ1 ? clampAngle('j1', options.fixedJ1) : null;
     const hasFixedJ4 = Number.isFinite(options.fixedJ4);
     const fixedJ4 = hasFixedJ4 ? clampAngle('j4', options.fixedJ4) : null;
+    const hasFixedJ6 = Number.isFinite(options.fixedJ6);
+    const fixedJ6 = hasFixedJ6 ? clampAngle('j6', options.fixedJ6) : null;
     const hasFixedJ5 = Number.isFinite(options.fixedJ5);
     const fixedJ5 = hasFixedJ5 ? clampAngle('j5', options.fixedJ5) : null;
     const hasFixedJ5WorldPitch = Number.isFinite(options.fixedJ5WorldPitchDeg);
@@ -247,14 +251,19 @@ export class Kinematics {
       fixedJ1,
       hasFixedJ4,
       fixedJ4,
+      hasFixedJ6,
+      fixedJ6,
       hasFixedJ5,
       fixedJ5,
       hasFixedJ5WorldPitch,
       fixedJ5WorldPitchDeg,
     };
 
-    const activeJoints = ['j1', 'j2', 'j3', 'j5'].filter((key) => {
+    const useWristJac = options.includeJ4J6InIkJacobian === true;
+    const activeJoints = ['j1', 'j2', 'j3', 'j4', 'j6', 'j5'].filter((key) => {
       if (key === 'j1' && hasFixedJ1) return false;
+      if (key === 'j4' && (hasFixedJ4 || !useWristJac)) return false;
+      if (key === 'j6' && (hasFixedJ6 || !useWristJac)) return false;
       if (key === 'j5' && (hasFixedJ5 || hasFixedJ5WorldPitch)) return false;
       return true;
     });
@@ -262,6 +271,7 @@ export class Kinematics {
     let angles = { ...currentAngles };
     if (hasFixedJ1) angles.j1 = fixedJ1;
     if (hasFixedJ4) angles.j4 = fixedJ4;
+    if (hasFixedJ6) angles.j6 = fixedJ6;
     if (hasFixedJ5) {
       angles.j5 = fixedJ5;
     } else if (hasFixedJ5WorldPitch) {
@@ -363,6 +373,7 @@ export class Kinematics {
 
       if (hasFixedJ1) angles.j1 = fixedJ1;
       if (hasFixedJ4) angles.j4 = fixedJ4;
+      if (hasFixedJ6) angles.j6 = fixedJ6;
 
       if (hasFixedJ5) {
         angles.j5 = fixedJ5;
@@ -398,6 +409,153 @@ export class Kinematics {
       this.linkLengths.forearm;
     const dist = Math.sqrt(target.x * target.x + target.y * target.y + target.z * target.z);
     return dist <= maxReach * 1.1; // %10 tolerans
+  }
+
+  /**
+   * TCP (FK matrisi) rotasyonunu dünya eksenleriyle hizalı tutmak için maliyet.
+   * Satır-düzenli R'de sütunlar = araç X/Y/Z dünyadaki yönü; ± eksenlere paralellik.
+   */
+  _tcpMatrixWorldAxesCost(M) {
+    const m0 = M[0], m1 = M[1], m2 = M[2];
+    const m4 = M[4], m5 = M[5], m6 = M[6];
+    const m8 = M[8], m9 = M[9], m10 = M[10];
+    const colX = m4 * m4 + m8 * m8 + (Math.abs(m0) - 1) * (Math.abs(m0) - 1);
+    const colY = m1 * m1 + m9 * m9 + (Math.abs(m5) - 1) * (Math.abs(m5) - 1);
+    const colZ = m2 * m2 + m6 * m6 + (Math.abs(m10) - 1) * (Math.abs(m10) - 1);
+    return colX + colY + colZ;
+  }
+
+  /**
+   * j6 (flanş Y roll) araç Y ≈ dünya Y iken X/Z düzleminde «gövde» hatasını döndürür;
+   * dar aralıkta ince tarama ile yerel minimumdan çıkmak için kullanılır.
+   */
+  _refineSweepJ6ForWorldAxes(baseAngles, targetPos, opts = {}) {
+    const posHold = opts.refinePositionHoldMm ?? 1.05;
+    const coarse = opts.refineJ6SweepStepDeg ?? 2.5;
+    const fineSpan = opts.refineJ6FineSpanDeg ?? 14;
+    const fineStep = opts.refineJ6FineStepDeg ?? 0.45;
+
+    const a0 = this._applyTcpDragLocks(baseAngles, opts);
+    if (Number.isFinite(opts.fixedJ6)) return a0;
+    let best = a0;
+    let bestC = Infinity;
+    let found = false;
+
+    const score = (trial) => {
+      const t = this._applyTcpDragLocks(trial, opts);
+      const fk = this.computeFK(t);
+      if (distance3D(targetPos, fk.position) > posHold) return null;
+      const c = this._tcpMatrixWorldAxesCost(fk.matrix);
+      return { t, c };
+    };
+
+    const consider = (trial) => {
+      const r = score(trial);
+      if (!r) return;
+      found = true;
+      if (r.c < bestC) {
+        bestC = r.c;
+        best = r.t;
+      }
+    };
+
+    const baseJ6 = a0.j6 || 0;
+    for (let d = -180; d <= 180 + 1e-6; d += coarse) {
+      consider({ ...a0, j6: clampAngle('j6', baseJ6 + d) });
+    }
+
+    const center = best.j6 || 0;
+    for (let d = -fineSpan; d <= fineSpan + 1e-6; d += fineStep) {
+      consider({ ...a0, j6: clampAngle('j6', center + d) });
+    }
+
+    return found ? best : a0;
+  }
+
+  /** solveIK / sürükleme ile aynı J1/J4/J5/J6 kilitlerini uygula */
+  _applyTcpDragLocks(angles, opts = {}) {
+    const a = { ...angles };
+    if (Number.isFinite(opts.fixedJ1)) a.j1 = clampAngle('j1', opts.fixedJ1);
+    if (Number.isFinite(opts.fixedJ4)) a.j4 = clampAngle('j4', opts.fixedJ4);
+    if (Number.isFinite(opts.fixedJ6)) a.j6 = clampAngle('j6', opts.fixedJ6);
+    if (Number.isFinite(opts.fixedJ5)) {
+      a.j5 = clampAngle('j5', opts.fixedJ5);
+    } else if (Number.isFinite(opts.fixedJ5WorldPitchDeg)) {
+      a.j5 = clampAngle('j5', -opts.fixedJ5WorldPitchDeg - (a.j2 + a.j3));
+    }
+    return this._clampAll(a);
+  }
+
+  /**
+   * Pozisyonu hedefe yakın tutarak TCP eksenlerini dünya X/Y/Z ile mümkün olduğunca paralel yapar.
+   * Dünya pitch kilidi + TCP ofseti j6'yı efektif olarak «araç Y» etrafında döndürür; X/Z için j6 geniş tarama + tırmanış.
+   */
+  refineTcpParallelWorldAxes(startAngles, targetPos, opts = {}) {
+    const maxIter = opts.refineMaxIter ?? 56;
+    let stepDeg = opts.refineStepDeg ?? 0.38;
+    const posHoldMm = opts.refinePositionHoldMm ?? 1.05;
+    const costTol = opts.refineCostTol ?? 0.009;
+
+    let a = this._applyTcpDragLocks(startAngles, opts);
+    a = this._refineSweepJ6ForWorldAxes(a, targetPos, opts);
+    let lastGood = a;
+    const fk0 = this.computeFK(a);
+    if (distance3D(targetPos, fk0.position) > posHoldMm + 0.35) {
+      return a;
+    }
+
+    const hasFixedJ1 = Number.isFinite(opts.fixedJ1);
+    const hasFixedJ4 = Number.isFinite(opts.fixedJ4);
+    const hasFixedJ6 = Number.isFinite(opts.fixedJ6);
+    const jointOrder = ['j6', 'j4', 'j3', 'j2', 'j1'].filter((k) => {
+      if (k === 'j1' && hasFixedJ1) return false;
+      if (k === 'j4' && hasFixedJ4) return false;
+      if (k === 'j6' && hasFixedJ6) return false;
+      return true;
+    });
+
+    for (let iter = 0; iter < maxIter; iter++) {
+      a = this._applyTcpDragLocks(a, opts);
+      const fk = this.computeFK(a);
+      const pe = distance3D(targetPos, fk.position);
+      if (pe > posHoldMm) {
+        return lastGood;
+      }
+      lastGood = a;
+
+      const c = this._tcpMatrixWorldAxesCost(fk.matrix);
+      if (c < costTol) {
+        return a;
+      }
+
+      let bestA = null;
+      let bestC = c;
+      for (const key of jointOrder) {
+        for (const sgn of [-1, 1]) {
+          const trial = this._applyTcpDragLocks(
+            { ...a, [key]: clampAngle(key, (a[key] || 0) + sgn * stepDeg) },
+            opts
+          );
+          const fk2 = this.computeFK(trial);
+          if (distance3D(targetPos, fk2.position) > posHoldMm) continue;
+          const c2 = this._tcpMatrixWorldAxesCost(fk2.matrix);
+          if (c2 < bestC - 1e-7) {
+            bestC = c2;
+            bestA = trial;
+          }
+        }
+      }
+
+      if (bestA) {
+        a = bestA;
+      } else {
+        stepDeg *= 0.74;
+        if (stepDeg < 0.055) break;
+      }
+    }
+
+    a = this._refineSweepJ6ForWorldAxes(lastGood, targetPos, opts);
+    return this._applyTcpDragLocks(a, opts);
   }
 
   /**
