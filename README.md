@@ -9,11 +9,11 @@ https://www.youtube.com/watch?v=oFCUw1pXlnA&t=130s
 https://youtu.be/5EUUerlajmY
 
 # Arduino Mega Codes 
-6DoF_Arm_BT_IO.ino
-it has included bluetoot HC06 module compatibility
+[6DoF_Arm_BT_IO/6DoF_Arm_BT_IO.ino](6DoF_Arm_BT_IO/6DoF_Arm_BT_IO.ino)
+it has included bluetooth HC06 module compatibility
 
 Board Pin Numbers 
-PinNumbers_For_ArduinoMega.txt
+[6DoF_Arm_BT_IO/PinNumbers_For_ArduinoMega.txt](6DoF_Arm_BT_IO/PinNumbers_For_ArduinoMega.txt)
 
 AX	  1	  2	    3	    4	    5	    6
 EN   45	  41	  37	  A0	  46	  A6	
