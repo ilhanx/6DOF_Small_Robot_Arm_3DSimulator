@@ -53,6 +53,18 @@ npm run preview   # derlemeyi yerelde test et
 - GitHub Pages: main'e push → GitHub Actions ile otomatik derlenip yayınlanır (`.github/workflows/`)
 - Satır sonu: repo LF, Windows'ta CRLF uyarıları normal — dosyaların satır sonlarını toplu değiştirme.
 
+## Ajan Ekibi
+
+Bu çalışma alanı genelinde (`.claude/agents/`) 5 rollük bir geliştirme ekibi
+tanımlıdır: `architect` (mimari plan, salt okunur), `implementer` (kod yazma,
+`kurumsal-tasarim` skill'i yüklü — UI/panel çalışmalarında uygula), `code-reviewer`
+(kod incelemesi, salt okunur), `tester` (test yazma/koşturma), `security-reviewer`
+(güvenlik denetimi, salt okunur). Uygun görevleri bu ajanlara devret; birden
+fazlası gerekiyorsa paralel çalıştır. **Dikkat:** main'e push otomatik olarak
+GitHub Actions ile canlıya (GitHub Pages) yayınlanır — implementer'ın push
+öncesi mutlaka gözle/dev server'da doğrulaması, push'un ise kullanıcı onayı
+gerektirdiği unutulmamalı.
+
 ## Çalışma Kuralları
 
 1. UI metinleri `i18n.js` üzerinden — hardcode Türkçe/İngilizce metin ekleme.
